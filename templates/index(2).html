@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Volatil Board – IEM Cologne 2026</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e1013;
+    --panel: #171a1f;
+    --panel-border: #262b32;
+    --text: #e8e6e1;
+    --muted: #7a8085;
+    --good: #6ee7a8;
+    --good-dim: #234233;
+    --amber: #f2b84b;
+    --danger: #e8607a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    padding: 0 0 4rem;
+  }
+
+  header {
+    padding: 2.6rem 1.5rem 1.8rem;
+    max-width: 980px;
+    margin: 0 auto;
+    border-bottom: 1px solid var(--panel-border);
+  }
+
+  .eyebrow {
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--good);
+    margin: 0 0 0.6rem;
+  }
+
+  h1 {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+    font-size: clamp(1.9rem, 4vw, 2.7rem);
+    letter-spacing: 0.01em;
+    margin: 0 0 0.5rem;
+    text-transform: uppercase;
+  }
+
+  .subline {
+    color: var(--muted);
+    font-size: 0.85rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2rem;
+    margin-top: 0.8rem;
+  }
+
+  .subline b { color: var(--text); }
+
+  .refresh {
+    display: inline-block;
+    margin-top: 1.1rem;
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+
+  .refresh:hover { border-color: var(--good); color: var(--good); }
+
+  .discount-form {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1.1rem;
+    margin-left: 0.8rem;
+  }
+
+  .discount-form label {
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .discount-form input[type="number"] {
+    width: 5.5rem;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: 3px;
+  }
+
+  .discount-form input[type="number"]:focus {
+    outline: none;
+    border-color: var(--good);
+  }
+
+  .discount-form button {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--good);
+    background: var(--good-dim);
+    color: var(--good);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .discount-form button:hover { background: #2c5940; }
+
+  main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 1.8rem 1.5rem 0;
+  }
+
+  .board {
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--panel);
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 3.2rem 1fr 1fr 9rem 9rem;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--panel-border);
+    font-size: 0.86rem;
+  }
+
+  .row:last-child { border-bottom: none; }
+
+  .row.head {
+    color: var(--muted);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    background: #12151a;
+  }
+
+  .rank {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 600;
+    color: var(--muted);
+  }
+
+  .row.top .rank { color: var(--good); }
+  .row.top { background: linear-gradient(90deg, var(--good-dim), transparent 55%); }
+
+  .team { font-weight: 500; }
+  .vs { color: var(--muted); font-size: 0.72rem; margin: 0 0.4rem; }
+
+  .tokens { color: var(--amber); text-align: right; }
+  .price {
+    text-align: right;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .row.top .price { color: var(--good); }
+
+  .missing {
+    margin-top: 2rem;
+    padding: 1rem 1.2rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  .missing b { color: var(--danger); }
+
+  .error-banner {
+    margin: 1.5rem 0;
+    padding: 1rem 1.2rem;
+    border: 1px solid var(--danger);
+    border-radius: 6px;
+    color: var(--danger);
+    font-size: 0.82rem;
+    background: #241419;
+  }
+
+  footer {
+    max-width: 980px;
+    margin: 2.5rem auto 0;
+    padding: 0 1.5rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+  }
+
+  @media (max-width: 640px) {
+    .row { grid-template-columns: 2.4rem 1fr 5.5rem; }
+    .row.head span:nth-child(3), .row.head span:nth-child(4) { display: none; }
+    .tokens { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <p class="eyebrow">Volatile Shop &middot; Gold-Teamsticker</p>
+  <h1>Günstigste Matches</h1>
+  <div class="subline">
+    <span><b>{{ team_count }}</b> Teams geladen</span>
+    <span><b>{{ results|length }}</b> Matches berechnet</span>
+    <span>Stand: <b>{{ generated_at }}</b></span>
+  </div>
+  <a class="refresh" href="/refresh">Preise neu laden</a>
+
+  <form class="discount-form" action="/" method="get">
+    <label for="discount">Rabatt %</label>
+    <input type="number" id="discount" name="discount" min="0" max="99.9" step="0.1" value="{{ discount_percent }}">
+    <button type="submit">Anwenden</button>
+  </form>
+</header>
+
+<main>
+  {% if error %}
+  <div class="error-banner">
+    Aktualisierung fehlgeschlagen, es werden die letzten bekannten Preise angezeigt.<br>
+    {{ error }}
+  </div>
+  {% endif %}
+
+  <div class="board">
+    <div class="row head">
+      <span>#</span>
+      <span>Match</span>
+      <span></span>
+      <span style="text-align:right;">Tokens</span>
+      <span style="text-align:right;">Preis</span>
+    </div>
+    {% for m in results %}
+    <div class="row {% if loop.index <= 3 %}top{% endif %}">
+      <span class="rank">{{ "%02d"|format(loop.index) }}</span>
+      <span class="team">{{ m.team1 }} <span class="vs">vs</span> {{ m.team2 }}</span>
+      <span></span>
+      <span class="tokens">{{ "%.0f"|format(m.tokens) }}</span>
+      <span class="price">{{ "%.2f"|format(m.price_eur) }} ¥</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if missing %}
+  <div class="missing">
+    <b>Nicht gefunden:</b> {{ missing|join(", ") }}
+  </div>
+  {% endif %}
+</main>
+
+<footer>
+  Rabatt {{ discount_percent }} % &middot; Kurs: 100 Tokens = 153 ¥
+</footer>
+
+</body>
+</html>
