@@ -1,0 +1,428 @@
+{
+  "matches": [
+    {
+      "team1": "BetBoom",
+      "team2": "Liquid"
+    },
+    {
+      "team1": "BIG",
+      "team2": "Gaimin Gladiators"
+    },
+    {
+      "team1": "GamerLegion",
+      "team2": "FlyQuest"
+    },
+    {
+      "team1": "M80",
+      "team2": "Sharks"
+    },
+    {
+      "team1": "MIBR",
+      "team2": "TYLOO"
+    },
+    {
+      "team1": "SINNERS",
+      "team2": "NRG"
+    },
+    {
+      "team1": "B8",
+      "team2": "Thunder Logic"
+    },
+    {
+      "team1": "HEROIC",
+      "team2": "Lynn Vision"
+    },
+    {
+      "team1": "BIG",
+      "team2": "Liquid"
+    },
+    {
+      "team1": "BetBoom",
+      "team2": "Gaimin Gladiators"
+    },
+    {
+      "team1": "GamerLegion",
+      "team2": "NRG"
+    },
+    {
+      "team1": "HEROIC",
+      "team2": "Sharks"
+    },
+    {
+      "team1": "B8",
+      "team2": "TYLOO"
+    },
+    {
+      "team1": "MIBR",
+      "team2": "Thunder Logic"
+    },
+    {
+      "team1": "SINNERS",
+      "team2": "FlyQuest"
+    },
+    {
+      "team1": "M80",
+      "team2": "Lynn Vision"
+    },
+    {
+      "team1": "Liquid",
+      "team2": "HEROIC"
+    },
+    {
+      "team1": "M80",
+      "team2": "NRG"
+    },
+    {
+      "team1": "MIBR",
+      "team2": "Lynn Vision"
+    },
+    {
+      "team1": "GamerLegion",
+      "team2": "BIG"
+    },
+    {
+      "team1": "TYLOO",
+      "team2": "Sharks"
+    },
+    {
+      "team1": "Thunder Logic",
+      "team2": "FlyQuest"
+    },
+    {
+      "team1": "M80",
+      "team2": "B8"
+    },
+    {
+      "team1": "Gaimin Gladiators",
+      "team2": "HEROIC"
+    },
+    {
+      "team1": "TYLOO",
+      "team2": "SINNERS"
+    },
+    {
+      "team1": "GamerLegion",
+      "team2": "BetBoom"
+    },
+    {
+      "team1": "Liquid",
+      "team2": "MIBR"
+    },
+    {
+      "team1": "Thunder Logic",
+      "team2": "BIG"
+    },
+    {
+      "team1": "NRG",
+      "team2": "FlyQuest"
+    },
+    {
+      "team1": "Sharks",
+      "team2": "Lynn Vision"
+    },
+    {
+      "team1": "NRG",
+      "team2": "BIG"
+    },
+    {
+      "team1": "Liquid",
+      "team2": "FlyQuest"
+    },
+    {
+      "team1": "TYLOO",
+      "team2": "Lynn Vision"
+    },
+    {
+      "team1": "Spirit",
+      "team2": "MIBR"
+    },
+    {
+      "team1": "B8",
+      "team2": "M80"
+    },
+    {
+      "team1": "BetBoom",
+      "team2": "GamerLegion"
+    },
+    {
+      "team1": "Legacy",
+      "team2": "FlyQuest"
+    },
+    {
+      "team1": "G2",
+      "team2": "Monte"
+    },
+    {
+      "team1": "paiN",
+      "team2": "BIG"
+    },
+    {
+      "team1": "Astralis",
+      "team2": "9z"
+    },
+    {
+      "team1": "FUT",
+      "team2": "TYLOO"
+    },
+    {
+      "team1": "Legacy",
+      "team2": "MIBR"
+    },
+    {
+      "team1": "Spirit",
+      "team2": "BetBoom"
+    },
+    {
+      "team1": "Monte",
+      "team2": "BIG"
+    },
+    {
+      "team1": "G2",
+      "team2": "M80"
+    },
+    {
+      "team1": "paiN",
+      "team2": "TYLOO"
+    },
+    {
+      "team1": "FUT",
+      "team2": "B8"
+    },
+    {
+      "team1": "9z",
+      "team2": "FlyQuest"
+    },
+    {
+      "team1": "Astralis",
+      "team2": "GamerLegion"
+    },
+    {
+      "team1": "M80",
+      "team2": "Legacy"
+    },
+    {
+      "team1": "G2",
+      "team2": "BIG"
+    },
+    {
+      "team1": "Monte",
+      "team2": "BetBoom"
+    },
+    {
+      "team1": "TYLOO",
+      "team2": "9z"
+    },
+    {
+      "team1": "MIBR",
+      "team2": "B8"
+    },
+    {
+      "team1": "Astralis",
+      "team2": "paiN"
+    },
+    {
+      "team1": "BIG",
+      "team2": "B8"
+    },
+    {
+      "team1": "Legacy",
+      "team2": "TYLOO"
+    },
+    {
+      "team1": "Monte",
+      "team2": "paiN"
+    },
+    {
+      "team1": "Aurora",
+      "team2": "Spirit"
+    },
+    {
+      "team1": "Vitality",
+      "team2": "9z"
+    },
+    {
+      "team1": "Falcons",
+      "team2": "BetBoom"
+    },
+    {
+      "team1": "Natus Vincere",
+      "team2": "Legacy"
+    },
+    {
+      "team1": "FUT",
+      "team2": "G2"
+    },
+    {
+      "team1": "PARIVISION",
+      "team2": "Monte"
+    },
+    {
+      "team1": "FURIA",
+      "team2": "MOUZ"
+    },
+    {
+      "team1": "The MongolZ",
+      "team2": "B8"
+    },
+    {
+      "team1": "Natus Vincere",
+      "team2": "Spirit"
+    },
+    {
+      "team1": "Falcons",
+      "team2": "G2"
+    },
+    {
+      "team1": "Aurora",
+      "team2": "Monte"
+    },
+    {
+      "team1": "FURIA",
+      "team2": "B8"
+    },
+    {
+      "team1": "Vitality",
+      "team2": "FUT"
+    },
+    {
+      "team1": "MOUZ",
+      "team2": "Legacy"
+    },
+    {
+      "team1": "The MongolZ",
+      "team2": "BetBoom"
+    },
+    {
+      "team1": "PARIVISION",
+      "team2": "9z"
+    },
+    {
+      "team1": "BetBoom",
+      "team2": "FURIA"
+    },
+    {
+      "team1": "PARIVISION",
+      "team2": "Legacy"
+    },
+    {
+      "team1": "Vitality",
+      "team2": "MOUZ"
+    },
+    {
+      "team1": "Falcons",
+      "team2": "Monte"
+    },
+    {
+      "team1": "Aurora",
+      "team2": "G2"
+    },
+    {
+      "team1": "Natus Vincere",
+      "team2": "The MongolZ"
+    },
+    {
+      "team1": "B8",
+      "team2": "FUT"
+    },
+    {
+      "team1": "Natus Vincere",
+      "team2": "Falcons"
+    },
+    {
+      "team1": "G2",
+      "team2": "Legacy"
+    },
+    {
+      "team1": "BetBoom",
+      "team2": "Vitality"
+    },
+    {
+      "team1": "Aurora",
+      "team2": "9z"
+    },
+    {
+      "team1": "MOUZ",
+      "team2": "FUT"
+    },
+    {
+      "team1": "The MongolZ",
+      "team2": "Monte"
+    },
+    {
+      "team1": "Spirit",
+      "team2": "9z"
+    },
+    {
+      "team1": "Natus Vincere",
+      "team2": "G2"
+    },
+    {
+      "team1": "BetBoom",
+      "team2": "FUT"
+    },
+    {
+      "team1": "9z",
+      "team2": "The MongolZ"
+    },
+    {
+      "team1": "9z",
+      "team2": "FURIA"
+    },
+    {
+      "team1": "Aurora",
+      "team2": "BetBoom"
+    },
+    {
+      "team1": "G2",
+      "team2": "Spirit"
+    },
+    {
+      "team1": "Falcons",
+      "team2": "Vitality"
+    },
+    {
+      "team1": "Aurora",
+      "team2": "FURIA"
+    },
+    {
+      "team1": "Spirit",
+      "team2": "Falcons"
+    },
+    {
+      "team1": "FURIA",
+      "team2": "Falcons"
+    },
+    {
+      "team1": "Monte",
+      "team2": "Legacy"
+    },
+    {
+      "team1": "Astralis",
+      "team2": "TYLOO"
+    },
+    {
+      "team1": "MIBR",
+      "team2": "BIG"
+    },
+    {
+      "team1": "BetBoom",
+      "team2": "M80"
+    },
+    {
+      "team1": "FlyQuest",
+      "team2": "paiN"
+    },
+    {
+      "team1": "B8",
+      "team2": "GamerLegion"
+    },
+    {
+      "team1": "Spirit",
+      "team2": "9z"
+    },
+    {
+      "team1": "G2",
+      "team2": "FUT"
+    }
+  ]
+}

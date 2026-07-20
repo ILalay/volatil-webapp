@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Fehler – Volatil Board</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body {
+    background: #0e1013;
+    color: #e8e6e1;
+    font-family: 'JetBrains Mono', monospace;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    margin: 0;
+    padding: 1.5rem;
+  }
+  .box {
+    max-width: 520px;
+    border: 1px solid #e8607a;
+    border-radius: 6px;
+    padding: 1.5rem 1.8rem;
+    background: #241419;
+  }
+  h1 { font-size: 1.1rem; color: #e8607a; margin: 0 0 0.8rem; }
+  p { font-size: 0.85rem; line-height: 1.5; color: #e8e6e1; }
+  a { color: #6ee7a8; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <h1>Daten konnten nicht geladen werden</h1>
+    <p>{{ message }}</p>
+    <p><a href="/">Erneut versuchen</a></p>
+  </div>
+</body>
+</html>
