@@ -229,6 +229,23 @@
     max-height: 440px;
   }
 
+  .match-select {
+    width: 100%;
+    background: #12151a;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+  }
+
+  .match-select:focus {
+    outline: none;
+    border-color: var(--good);
+  }
+
   .row {
     display: grid;
     grid-template-columns: 3.2rem 1fr 6.5rem 9rem 9rem;
@@ -398,6 +415,26 @@
   </div>
   {% endif %}
 
+  {% if history_enabled %}
+  <div class="chart-panel" id="panel-match-history">
+    <div class="chart-panel-header" onclick="document.getElementById('panel-match-history').classList.toggle('collapsed')">
+      <h2>Verlauf pro Match</h2>
+      <span class="chart-toggle">▼</span>
+    </div>
+    <div class="chart-panel-body">
+      <select id="matchSelect" class="match-select">
+        {% for opt in match_options %}
+        <option value="{{ opt.index }}">{{ opt.label }}</option>
+        {% endfor %}
+      </select>
+      <canvas id="matchHistoryChart" height="100"></canvas>
+      <p id="matchHistoryEmpty" style="color: var(--muted); font-size: 0.82rem; margin-top: 0.8rem; display: none;">
+        Für dieses Match sind noch keine Verlaufsdaten vorhanden.
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="chart-panel" id="panel-top15">
     <div class="chart-panel-header" onclick="document.getElementById('panel-top15').classList.toggle('collapsed')">
       <h2>Günstigste {{ chart_labels|length }} Matches im Preisvergleich</h2>
@@ -532,6 +569,74 @@
         }
       }
     });
+  }
+
+  // ---- Verlauf pro Match (per Dropdown ausgewählt) ----
+  const matchSelect = document.getElementById('matchSelect');
+  let matchHistoryChart = null;
+
+  function loadMatchHistory(matchIndex) {
+    fetch(`/api/history/${matchIndex}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const canvas = document.getElementById('matchHistoryChart');
+        const emptyMsg = document.getElementById('matchHistoryEmpty');
+
+        if (!data.prices || data.prices.length < 2) {
+          canvas.style.display = 'none';
+          emptyMsg.style.display = 'block';
+          if (matchHistoryChart) { matchHistoryChart.destroy(); matchHistoryChart = null; }
+          return;
+        }
+
+        canvas.style.display = 'block';
+        emptyMsg.style.display = 'none';
+
+        if (matchHistoryChart) { matchHistoryChart.destroy(); }
+
+        matchHistoryChart = new Chart(canvas.getContext('2d'), {
+          type: 'line',
+          data: {
+            labels: data.labels,
+            datasets: [{
+              label: 'Preis (¥)',
+              data: data.prices,
+              borderColor: 'rgba(242, 184, 75, 0.9)',
+              backgroundColor: 'rgba(242, 184, 75, 0.12)',
+              pointRadius: 2,
+              pointBackgroundColor: 'rgba(242, 184, 75, 0.9)',
+              borderWidth: 2,
+              tension: 0.25,
+              fill: true
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: { callbacks: { label: (item) => `${item.raw.toFixed(2)} ¥` } }
+            },
+            scales: {
+              x: {
+                ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+                grid: { color: '#262b32' }
+              },
+              y: {
+                ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' } },
+                grid: { color: '#262b32' }
+              }
+            }
+          }
+        });
+      });
+  }
+
+  if (matchSelect) {
+    matchSelect.addEventListener('change', () => loadMatchHistory(matchSelect.value));
+    if (matchSelect.options.length > 0) {
+      loadMatchHistory(matchSelect.value);
+    }
   }
 
   // Lädt die Seite automatisch alle 30 Minuten neu, solange der Tab offen ist.
