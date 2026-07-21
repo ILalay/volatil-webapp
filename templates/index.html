@@ -265,6 +265,19 @@
   </div>
   {% endif %}
 
+  {% if history_enabled %}
+  <div class="chart-panel">
+    <h2>Preisverlauf günstigste Kombination</h2>
+    {% if history_labels|length > 1 %}
+    <canvas id="historyChart" height="90"></canvas>
+    {% else %}
+    <p style="color: var(--muted); font-size: 0.82rem; margin: 0;">
+      Noch nicht genug Datenpunkte gesammelt — der Verlauf füllt sich, sobald die Preise ein paar Mal aktualisiert wurden.
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="chart-panel">
     <h2>Günstigste {{ chart_labels|length }} Matches im Preisvergleich</h2>
     <canvas id="priceChart" height="420"></canvas>
@@ -343,5 +356,52 @@
       }
     }
   });
+
+  const historyLabels = {{ history_labels | tojson }};
+  const historyPrices = {{ history_prices | tojson }};
+  const historyCanvas = document.getElementById('historyChart');
+
+  if (historyCanvas && historyLabels.length > 1) {
+    new Chart(historyCanvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: historyLabels,
+        datasets: [{
+          label: 'Günstigster Preis (¥)',
+          data: historyPrices,
+          borderColor: 'rgba(110, 231, 168, 0.9)',
+          backgroundColor: 'rgba(110, 231, 168, 0.12)',
+          pointRadius: 2,
+          pointBackgroundColor: 'rgba(110, 231, 168, 0.9)',
+          borderWidth: 2,
+          tension: 0.25,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (item) => `${item.raw.toFixed(2)} ¥`
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+            grid: { color: '#262b32' }
+          },
+          y: {
+            ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' } },
+            grid: { color: '#262b32' }
+          }
+        }
+      }
+    });
+  }
 </script>
 </html>
+
