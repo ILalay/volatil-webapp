@@ -178,6 +178,9 @@ def build_page_data(force_token_refresh=False):
     team_tokens, error = get_team_tokens(force=force_token_refresh)
     results, missing = compute_results(team_tokens, discount)
 
+    chart_size = 15
+    top_results = results[:chart_size]
+
     return {
         "results": results,
         "missing": missing,
@@ -185,6 +188,8 @@ def build_page_data(force_token_refresh=False):
         "generated_at": time.strftime("%d.%m.%Y %H:%M:%S"),
         "error": error,
         "discount_percent": round(discount * 100, 2),
+        "chart_labels": [f"{r['team1']} vs {r['team2']}" for r in top_results],
+        "chart_prices": [round(r["price_eur"], 2) for r in top_results],
     }
 
 
