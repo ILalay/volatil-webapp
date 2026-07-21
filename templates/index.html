@@ -190,6 +190,37 @@
     overflow: hidden;
   }
 
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 0.7rem;
+    margin-bottom: 1.1rem;
+  }
+
+  .stat-box {
+    border: 1px solid var(--panel-border);
+    border-radius: 5px;
+    padding: 0.6rem 0.75rem;
+    background: #12151a;
+  }
+
+  .stat-box .label {
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+
+  .stat-box .value {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .stat-box .value.pos { color: var(--danger); }
+  .stat-box .value.neg { color: var(--good); }
+
   .chart-panel.collapsed .chart-panel-body {
     display: none;
   }
@@ -308,6 +339,42 @@
       <span class="chart-toggle">▼</span>
     </div>
     <div class="chart-panel-body">
+      {% if history_stats %}
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="label">Aktuell</div>
+          <div class="value">{{ "%.2f"|format(history_stats.current) }} ¥</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">Änderung</div>
+          {% if history_stats.change_abs is not none %}
+          <div class="value {% if history_stats.change_abs > 0 %}pos{% elif history_stats.change_abs < 0 %}neg{% endif %}">
+            {{ "%+.2f"|format(history_stats.change_abs) }} ¥
+            {% if history_stats.change_pct is not none %}({{ "%+.1f"|format(history_stats.change_pct) }}%){% endif %}
+          </div>
+          {% else %}
+          <div class="value">–</div>
+          {% endif %}
+        </div>
+        <div class="stat-box">
+          <div class="label">Minimum</div>
+          <div class="value">{{ "%.2f"|format(history_stats.min) }} ¥</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">Maximum</div>
+          <div class="value">{{ "%.2f"|format(history_stats.max) }} ¥</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">Durchschnitt</div>
+          <div class="value">{{ "%.2f"|format(history_stats.avg) }} ¥</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">Datenpunkte</div>
+          <div class="value">{{ history_stats.count }}</div>
+        </div>
+      </div>
+      {% endif %}
+
       {% if history_labels|length > 1 %}
       <canvas id="historyChart" height="90"></canvas>
       {% else %}
@@ -448,5 +515,11 @@
       }
     });
   }
+
+  // Lädt die Seite automatisch alle 30 Minuten neu, solange der Tab offen ist.
+  // Für zuverlässige Datensammlung im Hintergrund (auch bei geschlossenem Tab)
+  // sollte zusätzlich ein externer Cron-Dienst /refresh periodisch aufrufen.
+  setTimeout(() => window.location.reload(), 30 * 60 * 1000);
 </script>
 </html>
+
