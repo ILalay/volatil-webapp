@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="{{ current_lang }}">
 <head>
 <meta charset="UTF-8">
 <title>Volatil Board – IEM Cologne 2026</title>
@@ -34,6 +34,30 @@
     max-width: 980px;
     margin: 0 auto;
     border-bottom: 1px solid var(--panel-border);
+    position: relative;
+  }
+
+  .lang-switch {
+    position: absolute;
+    top: 1.3rem;
+    right: 1.5rem;
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .lang-btn {
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 3px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+  }
+
+  .lang-btn.active {
+    color: var(--good);
+    border-color: var(--good);
   }
 
   .eyebrow {
@@ -81,7 +105,8 @@
   .refresh:hover { border-color: var(--good); color: var(--good); }
 
   .discount-form {
-    display: inline-flex;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem;
     margin-top: 1.1rem;
@@ -126,6 +151,40 @@
   }
 
   .discount-form button:hover { background: #2c5940; }
+
+  .presets-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.9rem;
+    margin-left: 0.8rem;
+    align-items: center;
+  }
+
+  .presets-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-right: 0.2rem;
+  }
+
+  .preset-btn {
+    border: 1px solid var(--preset-color, var(--panel-border));
+    background: color-mix(in srgb, var(--preset-color, var(--panel-border)) 14%, transparent);
+    color: var(--preset-color, var(--text));
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease;
+  }
+
+  .preset-btn:hover {
+    background: color-mix(in srgb, var(--preset-color, var(--panel-border)) 28%, transparent);
+  }
 
   main {
     max-width: 980px;
@@ -331,51 +390,67 @@
     .row.head span:nth-child(3), .row.head span:nth-child(4) { display: none; }
     .tokens { display: none; }
     .sparkline-cell { display: none; }
+    .lang-switch { position: static; justify-content: flex-end; margin-bottom: 0.8rem; }
   }
 </style>
 </head>
 <body>
 
 <header>
-  <p class="eyebrow">Volatile Shop &middot; Gold-Teamsticker</p>
-  <h1>Günstigste Matches</h1>
-  <div class="subline">
-    <span><b>{{ team_count }}</b> Teams geladen</span>
-    <span><b>{{ results|length }}</b> Matches berechnet</span>
-    <span>Stand: <b>{{ generated_at }}</b></span>
+  <div class="lang-switch">
+    {% for code in supported_langs %}
+    <a class="lang-btn {% if code == current_lang %}active{% endif %}"
+       href="?lang={{ code }}{% if request.args.get('discount') %}&discount={{ request.args.get('discount') }}{% endif %}">{{ lang_labels[code] }}</a>
+    {% endfor %}
   </div>
-  <a class="refresh" href="/refresh">Preise neu laden</a>
 
-  <form class="discount-form" action="/" method="get">
-    <label for="discount">Rabatt %</label>
+  <p class="eyebrow">{{ t.eyebrow }}</p>
+  <h1>{{ t.title }}</h1>
+  <div class="subline">
+    <span>{{ t.teams_loaded.format(count=team_count) }}</span>
+    <span>{{ t.matches_calculated.format(count=results|length) }}</span>
+    <span>{{ t.generated_at.format(time=generated_at) }}</span>
+  </div>
+  <a class="refresh" href="/refresh">{{ t.refresh_button }}</a>
+
+  <form class="discount-form" id="discountForm" action="/" method="get">
+    <label for="discount">{{ t.discount_label }}</label>
     <input type="number" id="discount" name="discount" min="0" max="99.9" step="0.1" value="{{ discount_percent }}">
-    <button type="submit">Anwenden</button>
+    <button type="submit">{{ t.discount_apply }}</button>
   </form>
+
+  <div class="presets-row">
+    <span class="presets-label">{{ t.presets_label }}:</span>
+    {% for preset in discount_presets %}
+    <button type="button" class="preset-btn" style="--preset-color: {{ preset.color }};"
+            onclick="applyPreset({{ preset.discount }})">{{ preset.name }} ({{ preset.discount }}%)</button>
+    {% endfor %}
+  </div>
 </header>
 
 <main>
   {% if error %}
   <div class="error-banner">
-    Aktualisierung fehlgeschlagen, es werden die letzten bekannten Preise angezeigt.<br>
+    {{ t.error_banner }}<br>
     {{ error }}
   </div>
   {% endif %}
 
   {% if history_enabled %}
-  <div class="chart-panel" id="panel-history">
-    <div class="chart-panel-header" onclick="document.getElementById('panel-history').classList.toggle('collapsed')">
-      <h2>Preisverlauf günstigste Kombination</h2>
+  <div class="chart-panel collapsed" id="panel-history">
+    <div class="chart-panel-header" onclick="togglePanel('panel-history')">
+      <h2>{{ t.panel_history_title }}</h2>
       <span class="chart-toggle">▼</span>
     </div>
     <div class="chart-panel-body">
       {% if history_stats %}
       <div class="stats-grid">
         <div class="stat-box">
-          <div class="label">Aktuell</div>
+          <div class="label">{{ t.stat_current }}</div>
           <div class="value">{{ "%.2f"|format(history_stats.current) }} ¥</div>
         </div>
         <div class="stat-box">
-          <div class="label">Änderung</div>
+          <div class="label">{{ t.stat_change }}</div>
           {% if history_stats.change_abs is not none %}
           <div class="value {% if history_stats.change_abs > 0 %}pos{% elif history_stats.change_abs < 0 %}neg{% endif %}">
             {{ "%+.2f"|format(history_stats.change_abs) }} ¥
@@ -386,19 +461,19 @@
           {% endif %}
         </div>
         <div class="stat-box">
-          <div class="label">Minimum</div>
+          <div class="label">{{ t.stat_min }}</div>
           <div class="value">{{ "%.2f"|format(history_stats.min) }} ¥</div>
         </div>
         <div class="stat-box">
-          <div class="label">Maximum</div>
+          <div class="label">{{ t.stat_max }}</div>
           <div class="value">{{ "%.2f"|format(history_stats.max) }} ¥</div>
         </div>
         <div class="stat-box">
-          <div class="label">Durchschnitt</div>
+          <div class="label">{{ t.stat_avg }}</div>
           <div class="value">{{ "%.2f"|format(history_stats.avg) }} ¥</div>
         </div>
         <div class="stat-box">
-          <div class="label">Datenpunkte</div>
+          <div class="label">{{ t.stat_points }}</div>
           <div class="value">{{ history_stats.count }}</div>
         </div>
       </div>
@@ -408,7 +483,7 @@
       <canvas id="historyChart" height="90"></canvas>
       {% else %}
       <p style="color: var(--muted); font-size: 0.82rem; margin: 0;">
-        Noch nicht genug Datenpunkte gesammelt — der Verlauf füllt sich, sobald die Preise ein paar Mal aktualisiert wurden.
+        {{ t.history_not_enough }}
       </p>
       {% endif %}
     </div>
@@ -416,9 +491,9 @@
   {% endif %}
 
   {% if history_enabled %}
-  <div class="chart-panel" id="panel-match-history">
-    <div class="chart-panel-header" onclick="document.getElementById('panel-match-history').classList.toggle('collapsed')">
-      <h2>Verlauf pro Match</h2>
+  <div class="chart-panel collapsed" id="panel-match-history">
+    <div class="chart-panel-header" onclick="togglePanel('panel-match-history')">
+      <h2>{{ t.panel_match_history_title }}</h2>
       <span class="chart-toggle">▼</span>
     </div>
     <div class="chart-panel-body">
@@ -429,15 +504,15 @@
       </select>
       <canvas id="matchHistoryChart" height="100"></canvas>
       <p id="matchHistoryEmpty" style="color: var(--muted); font-size: 0.82rem; margin-top: 0.8rem; display: none;">
-        Für dieses Match sind noch keine Verlaufsdaten vorhanden.
+        {{ t.match_history_empty }}
       </p>
     </div>
   </div>
   {% endif %}
 
-  <div class="chart-panel" id="panel-top15">
-    <div class="chart-panel-header" onclick="document.getElementById('panel-top15').classList.toggle('collapsed')">
-      <h2>Günstigste {{ chart_labels|length }} Matches im Preisvergleich</h2>
+  <div class="chart-panel collapsed" id="panel-top15">
+    <div class="chart-panel-header" onclick="togglePanel('panel-top15')">
+      <h2>{{ t.panel_top15_title.format(n=chart_labels|length) }}</h2>
       <span class="chart-toggle">▼</span>
     </div>
     <div class="chart-panel-body">
@@ -448,10 +523,10 @@
   <div class="board">
     <div class="row head">
       <span>#</span>
-      <span>Match</span>
-      <span style="text-align:center;">Verlauf</span>
-      <span style="text-align:right;">Tokens</span>
-      <span style="text-align:right;">Preis</span>
+      <span>{{ t.table_match }}</span>
+      <span style="text-align:center;">{{ t.table_history }}</span>
+      <span style="text-align:right;">{{ t.table_tokens }}</span>
+      <span style="text-align:right;">{{ t.table_price }}</span>
     </div>
     {% for m in results %}
     <div class="row {% if loop.index <= 3 %}top{% endif %}">
@@ -472,13 +547,13 @@
 
   {% if missing %}
   <div class="missing">
-    <b>Nicht gefunden:</b> {{ missing|join(", ") }}
+    <b>{{ t.missing_label }}</b> {{ missing|join(", ") }}
   </div>
   {% endif %}
 </main>
 
 <footer>
-  Rabatt {{ discount_percent }} % &middot; Kurs: 100 Tokens = 153 ¥
+  {{ t.footer_text.format(percent=discount_percent) }}
 </footer>
 
 </body>
@@ -486,56 +561,64 @@
 <script>
   const chartLabels = {{ chart_labels | tojson }};
   const chartPrices = {{ chart_prices | tojson }};
-
-  const ctx = document.getElementById('priceChart').getContext('2d');
-  new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: chartLabels,
-      datasets: [{
-        label: 'Preis (¥)',
-        data: chartPrices,
-        backgroundColor: chartPrices.map((_, i) => i < 3 ? 'rgba(110, 231, 168, 0.85)' : 'rgba(242, 184, 75, 0.55)'),
-        borderRadius: 3,
-        maxBarThickness: 28
-      }]
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (item) => `${item.raw.toFixed(2)} ¥`
-          }
-        }
-      },
-      scales: {
-        x: {
-          ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' } },
-          grid: { color: '#262b32' }
-        },
-        y: {
-          ticks: { color: '#e8e6e1', font: { family: 'JetBrains Mono', size: 11 } },
-          grid: { display: false }
-        }
-      }
-    }
-  });
-
   const historyLabels = {{ history_labels | tojson }};
   const historyPrices = {{ history_prices | tojson }};
-  const historyCanvas = document.getElementById('historyChart');
+  const priceDatasetLabel = {{ t.price_dataset_label | tojson }};
+  const cheapestDatasetLabel = {{ t.cheapest_dataset_label | tojson }};
 
-  if (historyCanvas && historyLabels.length > 1) {
+  function applyPreset(discountValue) {
+    document.getElementById('discount').value = discountValue;
+    document.getElementById('discountForm').submit();
+  }
+
+  let top15Initialized = false;
+  function initTop15Chart() {
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: chartLabels,
+        datasets: [{
+          label: priceDatasetLabel,
+          data: chartPrices,
+          backgroundColor: chartPrices.map((_, i) => i < 3 ? 'rgba(110, 231, 168, 0.85)' : 'rgba(242, 184, 75, 0.55)'),
+          borderRadius: 3,
+          maxBarThickness: 28
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (item) => `${item.raw.toFixed(2)} ¥` } }
+        },
+        scales: {
+          x: {
+            ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' } },
+            grid: { color: '#262b32' }
+          },
+          y: {
+            ticks: { color: '#e8e6e1', font: { family: 'JetBrains Mono', size: 11 } },
+            grid: { display: false }
+          }
+        }
+      }
+    });
+  }
+
+  let historySummaryInitialized = false;
+  function initHistorySummaryChart() {
+    const historyCanvas = document.getElementById('historyChart');
+    if (!historyCanvas || historyLabels.length < 2) return;
+
     new Chart(historyCanvas.getContext('2d'), {
       type: 'line',
       data: {
         labels: historyLabels,
         datasets: [{
-          label: 'Günstigster Preis (¥)',
+          label: cheapestDatasetLabel,
           data: historyPrices,
           borderColor: 'rgba(110, 231, 168, 0.9)',
           backgroundColor: 'rgba(110, 231, 168, 0.12)',
@@ -551,11 +634,7 @@
         maintainAspectRatio: false,
         plugins: {
           legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (item) => `${item.raw.toFixed(2)} ¥`
-            }
-          }
+          tooltip: { callbacks: { label: (item) => `${item.raw.toFixed(2)} ¥` } }
         },
         scales: {
           x: {
@@ -574,6 +653,7 @@
   // ---- Verlauf pro Match (per Dropdown ausgewählt) ----
   const matchSelect = document.getElementById('matchSelect');
   let matchHistoryChart = null;
+  let matchHistoryInitialized = false;
 
   function loadMatchHistory(matchIndex) {
     fetch(`/api/history/${matchIndex}`)
@@ -599,7 +679,7 @@
           data: {
             labels: data.labels,
             datasets: [{
-              label: 'Preis (¥)',
+              label: priceDatasetLabel,
               data: data.prices,
               borderColor: 'rgba(242, 184, 75, 0.9)',
               backgroundColor: 'rgba(242, 184, 75, 0.12)',
@@ -634,9 +714,32 @@
 
   if (matchSelect) {
     matchSelect.addEventListener('change', () => loadMatchHistory(matchSelect.value));
-    if (matchSelect.options.length > 0) {
-      loadMatchHistory(matchSelect.value);
+  }
+
+  // Panels starten eingeklappt. Charts werden erst beim ersten Aufklappen
+  // erzeugt (lazy), damit Chart.js keine Größe 0 misst.
+  function togglePanel(panelId) {
+    const panel = document.getElementById(panelId);
+    panel.classList.toggle('collapsed');
+    if (panel.classList.contains('collapsed')) return;
+
+    if (panelId === 'panel-top15' && !top15Initialized) {
+      initTop15Chart();
+      top15Initialized = true;
     }
+    if (panelId === 'panel-history' && !historySummaryInitialized) {
+      initHistorySummaryChart();
+      historySummaryInitialized = true;
+    }
+    if (panelId === 'panel-match-history' && !matchHistoryInitialized && matchSelect && matchSelect.options.length > 0) {
+      loadMatchHistory(matchSelect.value);
+      matchHistoryInitialized = true;
+    }
+
+    panel.querySelectorAll('canvas').forEach((canvas) => {
+      const chart = Chart.getChart(canvas);
+      if (chart) requestAnimationFrame(() => chart.resize());
+    });
   }
 
   // Lädt die Seite automatisch alle 30 Minuten neu, solange der Tab offen ist.
