@@ -140,6 +140,28 @@
     background: var(--panel);
   }
 
+  .chart-panel {
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    background: var(--panel);
+    padding: 1.2rem 1.3rem 0.8rem;
+    margin-bottom: 1.6rem;
+  }
+
+  .chart-panel h2 {
+    font-family: 'Oswald', sans-serif;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 1rem;
+    font-weight: 600;
+  }
+
+  .chart-panel canvas {
+    max-height: 440px;
+  }
+
   .row {
     display: grid;
     grid-template-columns: 3.2rem 1fr 1fr 9rem 9rem;
@@ -243,6 +265,11 @@
   </div>
   {% endif %}
 
+  <div class="chart-panel">
+    <h2>Günstigste {{ chart_labels|length }} Matches im Preisvergleich</h2>
+    <canvas id="priceChart" height="420"></canvas>
+  </div>
+
   <div class="board">
     <div class="row head">
       <span>#</span>
@@ -274,4 +301,47 @@
 </footer>
 
 </body>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+  const chartLabels = {{ chart_labels | tojson }};
+  const chartPrices = {{ chart_prices | tojson }};
+
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: chartLabels,
+      datasets: [{
+        label: 'Preis (¥)',
+        data: chartPrices,
+        backgroundColor: chartPrices.map((_, i) => i < 3 ? 'rgba(110, 231, 168, 0.85)' : 'rgba(242, 184, 75, 0.55)'),
+        borderRadius: 3,
+        maxBarThickness: 28
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (item) => `${item.raw.toFixed(2)} ¥`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' } },
+          grid: { color: '#262b32' }
+        },
+        y: {
+          ticks: { color: '#e8e6e1', font: { family: 'JetBrains Mono', size: 11 } },
+          grid: { display: false }
+        }
+      }
+    }
+  });
+</script>
 </html>
