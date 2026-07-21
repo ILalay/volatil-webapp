@@ -30,6 +30,7 @@ MAX_HISTORY_POINTS = 500
 # Werte über die Zeit vergleichbar bleiben, egal was gerade im
 # Rabatt-Regler auf der Seite eingestellt ist.
 HISTORY_DISCOUNT = DEFAULT_DISCOUNT
+SPARKLINE_POINTS = 20  # wie viele der letzten Datenpunkte pro Match angezeigt werden
 
 RENAME = {
     "Berlin International Gaming": "BIG",
@@ -143,9 +144,21 @@ def load_history_from_gist():
         return []
 
     try:
-        return json.loads(file_info.get("content", "[]"))
+        raw_history = json.loads(file_info.get("content", "[]"))
     except ValueError:
         return []
+
+    # Ältere Einträge (vor Einführung der Match-Sparklines) hatten nur
+    # "price"/"match" statt "cheapest_price"/"cheapest_match"/"prices".
+    # Hier werden sie normalisiert, damit alte Daten weiter nutzbar bleiben.
+    normalized = []
+    for entry in raw_history:
+        entry.setdefault("cheapest_price", entry.get("price"))
+        entry.setdefault("cheapest_match", entry.get("match"))
+        entry.setdefault("prices", {})
+        normalized.append(entry)
+
+    return normalized
 
 
 def save_history_to_gist(history):
@@ -167,23 +180,26 @@ def save_history_to_gist(history):
 
 
 def append_history_point(team_tokens):
-    """Berechnet den aktuell günstigsten Preis (fixer Referenz-Rabatt) und
-    hängt einen Datenpunkt an die Gist-History an."""
+    """Berechnet die Preise aller Matches (fixer Referenz-Rabatt) und hängt
+    einen vollständigen Snapshot an die Gist-History an — so lassen sich
+    später sowohl der Gesamt-Verlauf als auch Sparklines pro Match zeigen."""
     if not history_enabled():
         return []
 
     results, _ = compute_results(team_tokens, HISTORY_DISCOUNT)
+    history = load_history_from_gist()
+
     if not results:
-        return load_history_from_gist()
+        return history
 
     cheapest = results[0]
 
-    history = load_history_from_gist()
     history.append(
         {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "price": round(cheapest["price_eur"], 2),
-            "match": f"{cheapest['team1']} vs {cheapest['team2']}",
+            "cheapest_price": round(cheapest["price_eur"], 2),
+            "cheapest_match": f"{cheapest['team1']} vs {cheapest['team2']}",
+            "prices": {str(r["match_index"]): round(r["price_eur"], 2) for r in results},
         }
     )
     save_history_to_gist(history)
@@ -220,7 +236,7 @@ def compute_results(team_tokens, discount):
     results = []
     missing = set()
 
-    for match in matches:
+    for idx, match in enumerate(matches):
         team1 = match["team1"]
         team2 = match["team2"]
 
@@ -237,6 +253,7 @@ def compute_results(team_tokens, discount):
 
         results.append(
             {
+                "match_index": idx,
                 "team1": team1,
                 "team2": team2,
                 "tokens": total_tokens,
@@ -268,7 +285,7 @@ def compute_history_stats(history):
     if not history:
         return None
 
-    prices = [h["price"] for h in history]
+    prices = [h["cheapest_price"] for h in history]
     current = prices[-1]
     previous = prices[-2] if len(prices) > 1 else None
 
@@ -290,6 +307,57 @@ def compute_history_stats(history):
     }
 
 
+def build_sparkline_svg(prices, width=90, height=26):
+    """Baut eine winzige Inline-SVG-Sparkline aus einer Preisliste (chronologisch)."""
+    if len(prices) < 2:
+        return ""
+
+    min_p, max_p = min(prices), max(prices)
+    price_range = (max_p - min_p) or 1
+    n = len(prices)
+    pad = 2
+
+    points = []
+    for i, p in enumerate(prices):
+        x = pad + (i / (n - 1)) * (width - 2 * pad)
+        y = height - pad - ((p - min_p) / price_range) * (height - 2 * pad)
+        points.append(f"{x:.1f},{y:.1f}")
+
+    # Rot, wenn der Preis über den Zeitraum gestiegen ist (teurer), sonst grün
+    stroke = "#e8607a" if prices[-1] > prices[0] else "#6ee7a8"
+    poly = " ".join(points)
+
+    return (
+        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+        f'class="sparkline" preserveAspectRatio="none">'
+        f'<polyline fill="none" stroke="{stroke}" stroke-width="1.6" '
+        f'stroke-linejoin="round" stroke-linecap="round" points="{poly}" />'
+        f"</svg>"
+    )
+
+
+def build_sparklines(results, history):
+    """Liefert {match_index: svg_markup} für alle Matches mit genug Datenpunkten."""
+    if not history:
+        return {}
+
+    match_indices = {r["match_index"] for r in results}
+    series = {idx: [] for idx in match_indices}
+
+    for snapshot in history:
+        snapshot_prices = snapshot.get("prices", {})
+        for idx in match_indices:
+            value = snapshot_prices.get(str(idx))
+            if value is not None:
+                series[idx].append(value)
+
+    return {
+        idx: build_sparkline_svg(prices[-SPARKLINE_POINTS:])
+        for idx, prices in series.items()
+        if len(prices) >= 2
+    }
+
+
 def build_page_data(force_token_refresh=False):
     discount = parse_discount(request.args.get("discount"))
     team_tokens, error = get_team_tokens(force=force_token_refresh)
@@ -299,6 +367,10 @@ def build_page_data(force_token_refresh=False):
     top_results = results[:chart_size]
 
     history = _cache["history"]
+
+    sparklines = build_sparklines(results, history)
+    for r in results:
+        r["sparkline_svg"] = sparklines.get(r["match_index"], "")
 
     return {
         "results": results,
@@ -311,7 +383,7 @@ def build_page_data(force_token_refresh=False):
         "chart_prices": [round(r["price_eur"], 2) for r in top_results],
         "history_enabled": history_enabled(),
         "history_labels": [h["timestamp"] for h in history],
-        "history_prices": [h["price"] for h in history],
+        "history_prices": [h["cheapest_price"] for h in history],
         "history_stats": compute_history_stats(history),
     }
 
