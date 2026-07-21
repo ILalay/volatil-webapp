@@ -264,6 +264,32 @@ def parse_discount(raw_value):
     return percent / 100
 
 
+def compute_history_stats(history):
+    if not history:
+        return None
+
+    prices = [h["price"] for h in history]
+    current = prices[-1]
+    previous = prices[-2] if len(prices) > 1 else None
+
+    change_abs = round(current - previous, 2) if previous is not None else None
+    change_pct = (
+        round((current - previous) / previous * 100, 1)
+        if previous not in (None, 0)
+        else None
+    )
+
+    return {
+        "current": round(current, 2),
+        "change_abs": change_abs,
+        "change_pct": change_pct,
+        "min": round(min(prices), 2),
+        "max": round(max(prices), 2),
+        "avg": round(sum(prices) / len(prices), 2),
+        "count": len(prices),
+    }
+
+
 def build_page_data(force_token_refresh=False):
     discount = parse_discount(request.args.get("discount"))
     team_tokens, error = get_team_tokens(force=force_token_refresh)
@@ -286,6 +312,7 @@ def build_page_data(force_token_refresh=False):
         "history_enabled": history_enabled(),
         "history_labels": [h["timestamp"] for h in history],
         "history_prices": [h["price"] for h in history],
+        "history_stats": compute_history_stats(history),
     }
 
 
@@ -315,3 +342,4 @@ def refresh():
 
 if __name__ == "__main__":
     app.run(debug=True)
+
