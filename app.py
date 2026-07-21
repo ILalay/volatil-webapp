@@ -372,6 +372,14 @@ def build_page_data(force_token_refresh=False):
     for r in results:
         r["sparkline_svg"] = sparklines.get(r["match_index"], "")
 
+    match_options = sorted(
+        (
+            {"index": r["match_index"], "label": f"{r['team1']} vs {r['team2']}"}
+            for r in results
+        ),
+        key=lambda x: x["label"],
+    )
+
     return {
         "results": results,
         "missing": missing,
@@ -385,6 +393,7 @@ def build_page_data(force_token_refresh=False):
         "history_labels": [h["timestamp"] for h in history],
         "history_prices": [h["cheapest_price"] for h in history],
         "history_stats": compute_history_stats(history),
+        "match_options": match_options,
     }
 
 
@@ -400,6 +409,21 @@ def index():
         return render_template("error.html", message=str(exc)), 500
 
     return render_template("index.html", **data)
+
+
+@app.route("/api/history/<int:match_index>")
+def api_match_history(match_index):
+    history = _cache["history"]
+
+    labels = []
+    prices = []
+    for snapshot in history:
+        value = snapshot.get("prices", {}).get(str(match_index))
+        if value is not None:
+            labels.append(snapshot["timestamp"])
+            prices.append(value)
+
+    return {"labels": labels, "prices": prices}
 
 
 @app.route("/refresh")
