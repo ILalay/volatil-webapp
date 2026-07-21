@@ -21,6 +21,16 @@ TOKENS_PER_100 = 153     # 100 Tokens = 153 ¥
 
 CACHE_SECONDS = 300  # Wie lange die Tokenpreise zwischengespeichert werden
 
+# History wird über GitHub Gists gespeichert (kostenlos, dauerhaft).
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GIST_ID = os.environ.get("GIST_ID")
+HISTORY_FILENAME = "price_history.json"
+MAX_HISTORY_POINTS = 500
+# History wird immer mit diesem festen Rabatt berechnet, damit die
+# Werte über die Zeit vergleichbar bleiben, egal was gerade im
+# Rabatt-Regler auf der Seite eingestellt ist.
+HISTORY_DISCOUNT = DEFAULT_DISCOUNT
+
 RENAME = {
     "Berlin International Gaming": "BIG",
     "Team Vitality": "Vitality",
@@ -47,7 +57,7 @@ RENAME = {
 # Cache nur für die (teure) API-Abfrage der Tokenpreise.
 # Die Rabattrechnung selbst ist billig und wird bei jedem Request neu gemacht,
 # damit der Nutzer den Rabatt live ändern kann ohne die API neu zu belasten.
-_cache = {"team_tokens": None, "timestamp": 0.0, "error": None}
+_cache = {"team_tokens": None, "timestamp": 0.0, "error": None, "history": []}
 
 
 # ============================================================
@@ -105,6 +115,81 @@ def load_matches():
         return json.load(f)["matches"]
 
 
+# ============================================================
+# Preisverlauf (History) via GitHub Gist
+# ============================================================
+
+def history_enabled():
+    return bool(GITHUB_TOKEN and GIST_ID)
+
+
+def load_history_from_gist():
+    if not history_enabled():
+        return []
+
+    response = requests.get(
+        f"https://api.github.com/gists/{GIST_ID}",
+        headers={
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+
+    gist = response.json()
+    file_info = gist.get("files", {}).get(HISTORY_FILENAME)
+    if not file_info:
+        return []
+
+    try:
+        return json.loads(file_info.get("content", "[]"))
+    except ValueError:
+        return []
+
+
+def save_history_to_gist(history):
+    if not history_enabled():
+        return
+
+    trimmed = history[-MAX_HISTORY_POINTS:]
+
+    response = requests.patch(
+        f"https://api.github.com/gists/{GIST_ID}",
+        headers={
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+        },
+        json={"files": {HISTORY_FILENAME: {"content": json.dumps(trimmed)}}},
+        timeout=10,
+    )
+    response.raise_for_status()
+
+
+def append_history_point(team_tokens):
+    """Berechnet den aktuell günstigsten Preis (fixer Referenz-Rabatt) und
+    hängt einen Datenpunkt an die Gist-History an."""
+    if not history_enabled():
+        return []
+
+    results, _ = compute_results(team_tokens, HISTORY_DISCOUNT)
+    if not results:
+        return load_history_from_gist()
+
+    cheapest = results[0]
+
+    history = load_history_from_gist()
+    history.append(
+        {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "price": round(cheapest["price_eur"], 2),
+            "match": f"{cheapest['team1']} vs {cheapest['team2']}",
+        }
+    )
+    save_history_to_gist(history)
+    return history
+
+
 def get_team_tokens(force=False):
     """Team-Tokens mit Cache laden. Wirft eine Exception, wenn nichts geladen werden kann."""
     now = time.time()
@@ -115,6 +200,12 @@ def get_team_tokens(force=False):
             _cache["team_tokens"] = load_team_tokens()
             _cache["error"] = None
             _cache["timestamp"] = now
+            try:
+                _cache["history"] = append_history_point(_cache["team_tokens"])
+            except requests.exceptions.RequestException:
+                # History-Update darf die Seite nicht zum Absturz bringen,
+                # falls die Gist-API mal nicht erreichbar ist.
+                pass
         except (requests.exceptions.RequestException, KeyError, ValueError) as exc:
             _cache["error"] = str(exc)
             if _cache["team_tokens"] is None:
@@ -181,6 +272,8 @@ def build_page_data(force_token_refresh=False):
     chart_size = 15
     top_results = results[:chart_size]
 
+    history = _cache["history"]
+
     return {
         "results": results,
         "missing": missing,
@@ -190,6 +283,9 @@ def build_page_data(force_token_refresh=False):
         "discount_percent": round(discount * 100, 2),
         "chart_labels": [f"{r['team1']} vs {r['team2']}" for r in top_results],
         "chart_prices": [round(r["price_eur"], 2) for r in top_results],
+        "history_enabled": history_enabled(),
+        "history_labels": [h["timestamp"] for h in history],
+        "history_prices": [h["price"] for h in history],
     }
 
 
