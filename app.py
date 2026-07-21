@@ -3,7 +3,7 @@ import os
 import time
 
 import requests
-from flask import Flask, render_template, request
+from flask import Flask, make_response, render_template, request
 
 app = Flask(__name__)
 
@@ -26,11 +26,8 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 GIST_ID = os.environ.get("GIST_ID")
 HISTORY_FILENAME = "price_history.json"
 MAX_HISTORY_POINTS = 500
-# History wird immer mit diesem festen Rabatt berechnet, damit die
-# Werte über die Zeit vergleichbar bleiben, egal was gerade im
-# Rabatt-Regler auf der Seite eingestellt ist.
 HISTORY_DISCOUNT = DEFAULT_DISCOUNT
-SPARKLINE_POINTS = 20  # wie viele der letzten Datenpunkte pro Match angezeigt werden
+SPARKLINE_POINTS = 20
 
 RENAME = {
     "Berlin International Gaming": "BIG",
@@ -55,10 +52,143 @@ RENAME = {
     "mousesports": "MOUZ",
 }
 
+# ============================================================
+# CS2-Raritätsstufen als Rabatt-Presets
+# ============================================================
+
+DISCOUNT_PRESETS = [
+    {"name": "Consumer Grade", "color": "#b0c3d9", "discount": 99},
+    {"name": "Industrial Grade", "color": "#5e98d9", "discount": 98},
+    {"name": "Mil-Spec Grade", "color": "#4b69ff", "discount": 96},
+    {"name": "Restricted", "color": "#8847ff", "discount": 93},
+    {"name": "Classified", "color": "#d32ce6", "discount": 89},
+    {"name": "Covert", "color": "#eb4b4b", "discount": 85},
+]
+
+# ============================================================
+# Übersetzungen
+# ============================================================
+
+SUPPORTED_LANGS = ["de", "en", "zh"]
+DEFAULT_LANG = "de"
+LANG_LABELS = {"de": "DE", "en": "EN", "zh": "中文"}
+
+TRANSLATIONS = {
+    "de": {
+        "eyebrow": "Volatile Shop · Gold-Teamsticker",
+        "title": "Günstigste Matches",
+        "teams_loaded": "{count} Teams geladen",
+        "matches_calculated": "{count} Matches berechnet",
+        "generated_at": "Stand: {time}",
+        "refresh_button": "Preise neu laden",
+        "discount_label": "Rabatt %",
+        "discount_apply": "Anwenden",
+        "presets_label": "Presets",
+        "error_banner": "Aktualisierung fehlgeschlagen, es werden die letzten bekannten Preise angezeigt.",
+        "panel_history_title": "Preisverlauf günstigste Kombination",
+        "stat_current": "Aktuell",
+        "stat_change": "Änderung",
+        "stat_min": "Minimum",
+        "stat_max": "Maximum",
+        "stat_avg": "Durchschnitt",
+        "stat_points": "Datenpunkte",
+        "history_not_enough": "Noch nicht genug Datenpunkte gesammelt — der Verlauf füllt sich, sobald die Preise ein paar Mal aktualisiert wurden.",
+        "panel_match_history_title": "Verlauf pro Match",
+        "match_history_empty": "Für dieses Match sind noch keine Verlaufsdaten vorhanden.",
+        "panel_top15_title": "Günstigste {n} Matches im Preisvergleich",
+        "table_match": "Match",
+        "table_history": "Verlauf",
+        "table_tokens": "Tokens",
+        "table_price": "Preis",
+        "missing_label": "Nicht gefunden:",
+        "footer_text": "Rabatt {percent} % · Kurs: 100 Tokens = 153 ¥",
+        "price_dataset_label": "Preis (¥)",
+        "cheapest_dataset_label": "Günstigster Preis (¥)",
+    },
+    "en": {
+        "eyebrow": "Volatile Shop · Gold Team Stickers",
+        "title": "Cheapest Matches",
+        "teams_loaded": "{count} teams loaded",
+        "matches_calculated": "{count} matches calculated",
+        "generated_at": "As of: {time}",
+        "refresh_button": "Reload prices",
+        "discount_label": "Discount %",
+        "discount_apply": "Apply",
+        "presets_label": "Presets",
+        "error_banner": "Update failed — showing the last known prices.",
+        "panel_history_title": "Price history — cheapest combination",
+        "stat_current": "Current",
+        "stat_change": "Change",
+        "stat_min": "Minimum",
+        "stat_max": "Maximum",
+        "stat_avg": "Average",
+        "stat_points": "Data points",
+        "history_not_enough": "Not enough data points yet — the chart fills in as prices get refreshed a few more times.",
+        "panel_match_history_title": "Per-match history",
+        "match_history_empty": "No history data available yet for this match.",
+        "panel_top15_title": "Cheapest {n} matches compared",
+        "table_match": "Match",
+        "table_history": "Trend",
+        "table_tokens": "Tokens",
+        "table_price": "Price",
+        "missing_label": "Not found:",
+        "footer_text": "Discount {percent}% · Rate: 100 tokens = ¥153",
+        "price_dataset_label": "Price (¥)",
+        "cheapest_dataset_label": "Cheapest price (¥)",
+    },
+    "zh": {
+        "eyebrow": "Volatile Shop · 金色战队贴纸",
+        "title": "最便宜的比赛",
+        "teams_loaded": "已加载 {count} 支战队",
+        "matches_calculated": "已计算 {count} 场比赛",
+        "generated_at": "更新时间：{time}",
+        "refresh_button": "刷新价格",
+        "discount_label": "折扣 %",
+        "discount_apply": "应用",
+        "presets_label": "预设",
+        "error_banner": "更新失败，当前显示的是最近一次已知价格。",
+        "panel_history_title": "最便宜组合的价格走势",
+        "stat_current": "当前",
+        "stat_change": "变化",
+        "stat_min": "最低",
+        "stat_max": "最高",
+        "stat_avg": "平均",
+        "stat_points": "数据点",
+        "history_not_enough": "数据点还不够——价格多刷新几次后走势图就会填满。",
+        "panel_match_history_title": "单场比赛走势",
+        "match_history_empty": "该场比赛暂无历史数据。",
+        "panel_top15_title": "最便宜的 {n} 场比赛对比",
+        "table_match": "比赛",
+        "table_history": "走势",
+        "table_tokens": "代币",
+        "table_price": "价格",
+        "missing_label": "未找到：",
+        "footer_text": "折扣 {percent}% · 汇率：100代币 = ¥153",
+        "price_dataset_label": "价格 (¥)",
+        "cheapest_dataset_label": "最低价格 (¥)",
+    },
+}
+
 # Cache nur für die (teure) API-Abfrage der Tokenpreise.
-# Die Rabattrechnung selbst ist billig und wird bei jedem Request neu gemacht,
-# damit der Nutzer den Rabatt live ändern kann ohne die API neu zu belasten.
 _cache = {"team_tokens": None, "timestamp": 0.0, "error": None, "history": []}
+
+
+# ============================================================
+# Sprachauflösung
+# ============================================================
+
+def resolve_lang():
+    """Bestimmt die Sprache: expliziter ?lang= Parameter > Cookie > Browsersprache > Standard."""
+    requested = request.args.get("lang")
+    if requested in SUPPORTED_LANGS:
+        return requested
+
+    cookie_lang = request.cookies.get("lang")
+    if cookie_lang in SUPPORTED_LANGS:
+        return cookie_lang
+
+    best = request.accept_languages.best_match(SUPPORTED_LANGS)
+    return best or DEFAULT_LANG
 
 
 # ============================================================
@@ -148,9 +278,6 @@ def load_history_from_gist():
     except ValueError:
         return []
 
-    # Ältere Einträge (vor Einführung der Match-Sparklines) hatten nur
-    # "price"/"match" statt "cheapest_price"/"cheapest_match"/"prices".
-    # Hier werden sie normalisiert, damit alte Daten weiter nutzbar bleiben.
     normalized = []
     for entry in raw_history:
         entry.setdefault("cheapest_price", entry.get("price"))
@@ -181,8 +308,7 @@ def save_history_to_gist(history):
 
 def append_history_point(team_tokens):
     """Berechnet die Preise aller Matches (fixer Referenz-Rabatt) und hängt
-    einen vollständigen Snapshot an die Gist-History an — so lassen sich
-    später sowohl der Gesamt-Verlauf als auch Sparklines pro Match zeigen."""
+    einen vollständigen Snapshot an die Gist-History an."""
     if not history_enabled():
         return []
 
@@ -219,8 +345,6 @@ def get_team_tokens(force=False):
             try:
                 _cache["history"] = append_history_point(_cache["team_tokens"])
             except requests.exceptions.RequestException:
-                # History-Update darf die Seite nicht zum Absturz bringen,
-                # falls die Gist-API mal nicht erreichbar ist.
                 pass
         except (requests.exceptions.RequestException, KeyError, ValueError) as exc:
             _cache["error"] = str(exc)
@@ -267,9 +391,9 @@ def compute_results(team_tokens, discount):
 
 
 def parse_discount(raw_value):
-    """Erwartet einen Prozentwert als String (z. B. '96' oder '96.5') und
-    liefert einen Faktor zwischen 0 und 0.999 zurück. Bei ungültiger Eingabe
-    wird der Standardwert genutzt."""
+    """Erwartet einen Prozentwert als String und liefert einen Faktor
+    zwischen 0 und 0.999 zurück. Bei ungültiger Eingabe wird der
+    Standardwert genutzt."""
     if raw_value is None or raw_value == "":
         return DEFAULT_DISCOUNT
     try:
@@ -323,7 +447,6 @@ def build_sparkline_svg(prices, width=90, height=26):
         y = height - pad - ((p - min_p) / price_range) * (height - 2 * pad)
         points.append(f"{x:.1f},{y:.1f}")
 
-    # Rot, wenn der Preis über den Zeitraum gestiegen ist (teurer), sonst grün
     stroke = "#e8607a" if prices[-1] > prices[0] else "#6ee7a8"
     poly = " ".join(points)
 
@@ -337,7 +460,6 @@ def build_sparkline_svg(prices, width=90, height=26):
 
 
 def build_sparklines(results, history):
-    """Liefert {match_index: svg_markup} für alle Matches mit genug Datenpunkten."""
     if not history:
         return {}
 
@@ -358,7 +480,7 @@ def build_sparklines(results, history):
     }
 
 
-def build_page_data(force_token_refresh=False):
+def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     discount = parse_discount(request.args.get("discount"))
     team_tokens, error = get_team_tokens(force=force_token_refresh)
     results, missing = compute_results(team_tokens, discount)
@@ -394,7 +516,24 @@ def build_page_data(force_token_refresh=False):
         "history_prices": [h["cheapest_price"] for h in history],
         "history_stats": compute_history_stats(history),
         "match_options": match_options,
+        "t": TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]),
+        "current_lang": lang,
+        "supported_langs": SUPPORTED_LANGS,
+        "lang_labels": LANG_LABELS,
+        "discount_presets": DISCOUNT_PRESETS,
     }
+
+
+def render_with_lang(force_token_refresh=False):
+    lang = resolve_lang()
+    try:
+        data = build_page_data(force_token_refresh=force_token_refresh, lang=lang)
+    except Exception as exc:  # noqa: BLE001 - bewusst breit, um Fehlerseite zu zeigen
+        return render_template("error.html", message=str(exc)), 500
+
+    resp = make_response(render_template("index.html", **data))
+    resp.set_cookie("lang", lang, max_age=60 * 60 * 24 * 365)
+    return resp
 
 
 # ============================================================
@@ -403,12 +542,7 @@ def build_page_data(force_token_refresh=False):
 
 @app.route("/")
 def index():
-    try:
-        data = build_page_data()
-    except Exception as exc:  # noqa: BLE001 - bewusst breit, um Fehlerseite zu zeigen
-        return render_template("error.html", message=str(exc)), 500
-
-    return render_template("index.html", **data)
+    return render_with_lang()
 
 
 @app.route("/api/history/<int:match_index>")
@@ -428,12 +562,7 @@ def api_match_history(match_index):
 
 @app.route("/refresh")
 def refresh():
-    try:
-        data = build_page_data(force_token_refresh=True)
-    except Exception as exc:  # noqa: BLE001
-        return render_template("error.html", message=str(exc)), 500
-
-    return render_template("index.html", **data)
+    return render_with_lang(force_token_refresh=True)
 
 
 if __name__ == "__main__":
