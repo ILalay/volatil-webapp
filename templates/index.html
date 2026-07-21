@@ -231,7 +231,7 @@
 
   .row {
     display: grid;
-    grid-template-columns: 3.2rem 1fr 1fr 9rem 9rem;
+    grid-template-columns: 3.2rem 1fr 6.5rem 9rem 9rem;
     align-items: center;
     padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--panel-border);
@@ -258,6 +258,17 @@
   .row.top { background: linear-gradient(90deg, var(--good-dim), transparent 55%); }
 
   .team { font-weight: 500; }
+
+  .sparkline-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sparkline-cell .no-data {
+    color: var(--muted);
+    font-size: 0.72rem;
+  }
   .vs { color: var(--muted); font-size: 0.72rem; margin: 0 0.4rem; }
 
   .tokens { color: var(--amber); text-align: right; }
@@ -302,6 +313,7 @@
     .row { grid-template-columns: 2.4rem 1fr 5.5rem; }
     .row.head span:nth-child(3), .row.head span:nth-child(4) { display: none; }
     .tokens { display: none; }
+    .sparkline-cell { display: none; }
   }
 </style>
 </head>
@@ -400,7 +412,7 @@
     <div class="row head">
       <span>#</span>
       <span>Match</span>
-      <span></span>
+      <span style="text-align:center;">Verlauf</span>
       <span style="text-align:right;">Tokens</span>
       <span style="text-align:right;">Preis</span>
     </div>
@@ -408,7 +420,13 @@
     <div class="row {% if loop.index <= 3 %}top{% endif %}">
       <span class="rank">{{ "%02d"|format(loop.index) }}</span>
       <span class="team">{{ m.team1 }} <span class="vs">vs</span> {{ m.team2 }}</span>
-      <span></span>
+      <span class="sparkline-cell">
+        {% if m.sparkline_svg %}
+        {{ m.sparkline_svg | safe }}
+        {% else %}
+        <span class="no-data">–</span>
+        {% endif %}
+      </span>
       <span class="tokens">{{ "%.0f"|format(m.tokens) }}</span>
       <span class="price">{{ "%.2f"|format(m.price_eur) }} ¥</span>
     </div>
@@ -522,4 +540,3 @@
   setTimeout(() => window.location.reload(), 30 * 60 * 1000);
 </script>
 </html>
-
