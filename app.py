@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from datetime import datetime, timedelta
 
 import requests
 from flask import Flask, make_response, render_template, request
@@ -88,6 +89,7 @@ TRANSLATIONS = {
         "panel_history_title": "Preisverlauf günstigste Kombination",
         "stat_current": "Aktuell",
         "stat_change": "Änderung",
+        "stat_change_24h": "Änderung (24h)",
         "stat_min": "Minimum",
         "stat_max": "Maximum",
         "stat_avg": "Durchschnitt",
@@ -119,6 +121,7 @@ TRANSLATIONS = {
         "panel_history_title": "Price history — cheapest combination",
         "stat_current": "Current",
         "stat_change": "Change",
+        "stat_change_24h": "Change (24h)",
         "stat_min": "Minimum",
         "stat_max": "Maximum",
         "stat_avg": "Average",
@@ -150,6 +153,7 @@ TRANSLATIONS = {
         "panel_history_title": "最便宜组合的价格走势",
         "stat_current": "当前",
         "stat_change": "变化",
+        "stat_change_24h": "24小时变化",
         "stat_min": "最低",
         "stat_max": "最高",
         "stat_avg": "平均",
@@ -410,8 +414,16 @@ def compute_history_stats(history):
         return None
 
     prices = [h["cheapest_price"] for h in history]
+    timestamps = [h["timestamp"] for h in history]
     current = prices[-1]
-    previous = prices[-2] if len(prices) > 1 else None
+
+    # "Änderung": letzte tatsächliche Preisbewegung — überspringt Wiederholungen,
+    # bei denen sich der Preis zwischen zwei Aktualisierungen nicht bewegt hat.
+    previous = None
+    for p in reversed(prices[:-1]):
+        if p != current:
+            previous = p
+            break
 
     change_abs = round(current - previous, 2) if previous is not None else None
     change_pct = (
@@ -420,10 +432,34 @@ def compute_history_stats(history):
         else None
     )
 
+    # Zusätzlich: Änderung über die letzten ~24 Stunden, falls genug History vorhanden.
+    change_24h_abs = None
+    change_24h_pct = None
+    if len(prices) > 1:
+        try:
+            current_dt = datetime.strptime(timestamps[-1], "%Y-%m-%dT%H:%M:%S")
+            target_dt = current_dt - timedelta(hours=24)
+
+            ref_price = prices[0]  # Fallback: ältester verfügbarer Punkt
+            for ts, p in zip(timestamps, prices):
+                dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+                if dt <= target_dt:
+                    ref_price = p
+                else:
+                    break
+
+            change_24h_abs = round(current - ref_price, 2)
+            if ref_price:
+                change_24h_pct = round((current - ref_price) / ref_price * 100, 1)
+        except ValueError:
+            pass
+
     return {
         "current": round(current, 2),
         "change_abs": change_abs,
         "change_pct": change_pct,
+        "change_24h_abs": change_24h_abs,
+        "change_24h_pct": change_24h_pct,
         "min": round(min(prices), 2),
         "max": round(max(prices), 2),
         "avg": round(sum(prices) / len(prices), 2),
@@ -567,4 +603,3 @@ def refresh():
 
 if __name__ == "__main__":
     app.run(debug=True)
-
