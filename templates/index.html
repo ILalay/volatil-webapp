@@ -88,9 +88,16 @@
 
   .subline b { color: var(--text); }
 
+  .controls {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.9rem;
+    margin-top: 1.2rem;
+  }
+
   .refresh {
     display: inline-block;
-    margin-top: 1.1rem;
     padding: 0.5rem 1rem;
     border: 1px solid var(--panel-border);
     color: var(--text);
@@ -108,9 +115,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
-    margin-top: 1.1rem;
-    margin-left: 0.8rem;
+    gap: 0.6rem;
   }
 
   .discount-form label {
@@ -129,6 +134,13 @@
     font-size: 0.85rem;
     padding: 0.45rem 0.6rem;
     border-radius: 3px;
+    -moz-appearance: textfield;
+  }
+
+  .discount-form input[type="number"]::-webkit-outer-spin-button,
+  .discount-form input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
   }
 
   .discount-form input[type="number"]:focus {
@@ -156,8 +168,6 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
-    margin-top: 0.9rem;
-    margin-left: 0.8rem;
     align-items: center;
   }
 
@@ -411,20 +421,23 @@
     <span>{{ t.matches_calculated.format(count=results|length) }}</span>
     <span>{{ t.generated_at.format(time=generated_at) }}</span>
   </div>
-  <a class="refresh" href="/refresh">{{ t.refresh_button }}</a>
 
-  <form class="discount-form" id="discountForm" action="/" method="get">
-    <label for="discount">{{ t.discount_label }}</label>
-    <input type="number" id="discount" name="discount" min="0" max="99.9" step="0.1" value="{{ discount_percent }}">
-    <button type="submit">{{ t.discount_apply }}</button>
-  </form>
+  <div class="controls">
+    <a class="refresh" href="/refresh">{{ t.refresh_button }}</a>
 
-  <div class="presets-row">
-    <span class="presets-label">{{ t.presets_label }}:</span>
-    {% for preset in discount_presets %}
-    <button type="button" class="preset-btn" style="--preset-color: {{ preset.color }};"
-            onclick="applyPreset({{ preset.discount }})">{{ preset.name }} ({{ preset.discount }}%)</button>
-    {% endfor %}
+    <form class="discount-form" id="discountForm" action="/" method="get">
+      <label for="discount">{{ t.discount_label }}</label>
+      <input type="number" id="discount" name="discount" min="0" max="99.9" step="0.1" value="{{ discount_percent }}">
+      <button type="submit">{{ t.discount_apply }}</button>
+    </form>
+
+    <div class="presets-row">
+      <span class="presets-label">{{ t.presets_label }}:</span>
+      {% for preset in discount_presets %}
+      <button type="button" class="preset-btn" style="--preset-color: {{ preset.color }};"
+              onclick="applyPreset({{ preset.discount }})">{{ preset.name }} ({{ preset.discount }}%)</button>
+      {% endfor %}
+    </div>
   </div>
 </header>
 
@@ -455,6 +468,17 @@
           <div class="value {% if history_stats.change_abs > 0 %}pos{% elif history_stats.change_abs < 0 %}neg{% endif %}">
             {{ "%+.2f"|format(history_stats.change_abs) }} ¥
             {% if history_stats.change_pct is not none %}({{ "%+.1f"|format(history_stats.change_pct) }}%){% endif %}
+          </div>
+          {% else %}
+          <div class="value">–</div>
+          {% endif %}
+        </div>
+        <div class="stat-box">
+          <div class="label">{{ t.stat_change_24h }}</div>
+          {% if history_stats.change_24h_abs is not none %}
+          <div class="value {% if history_stats.change_24h_abs > 0 %}pos{% elif history_stats.change_24h_abs < 0 %}neg{% endif %}">
+            {{ "%+.2f"|format(history_stats.change_24h_abs) }} ¥
+            {% if history_stats.change_24h_pct is not none %}({{ "%+.1f"|format(history_stats.change_24h_pct) }}%){% endif %}
           </div>
           {% else %}
           <div class="value">–</div>
