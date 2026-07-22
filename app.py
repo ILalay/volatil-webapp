@@ -85,6 +85,7 @@ TRANSLATIONS = {
         "discount_label": "Rabatt %",
         "discount_apply": "Anwenden",
         "presets_label": "Presets",
+        "custom_toggle": "Eigener Wert",
         "error_banner": "Aktualisierung fehlgeschlagen, es werden die letzten bekannten Preise angezeigt.",
         "panel_history_title": "Preisverlauf günstigste Kombination",
         "stat_current": "Aktuell",
@@ -117,6 +118,7 @@ TRANSLATIONS = {
         "discount_label": "Discount %",
         "discount_apply": "Apply",
         "presets_label": "Presets",
+        "custom_toggle": "Custom",
         "error_banner": "Update failed — showing the last known prices.",
         "panel_history_title": "Price history — cheapest combination",
         "stat_current": "Current",
@@ -149,6 +151,7 @@ TRANSLATIONS = {
         "discount_label": "折扣 %",
         "discount_apply": "应用",
         "presets_label": "预设",
+        "custom_toggle": "自定义",
         "error_banner": "更新失败，当前显示的是最近一次已知价格。",
         "panel_history_title": "最便宜组合的价格走势",
         "stat_current": "当前",
@@ -538,13 +541,18 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         key=lambda x: x["label"],
     )
 
+    discount_percent = round(discount * 100, 2)
+    preset_values = {p["discount"] for p in DISCOUNT_PRESETS}
+    is_custom_discount = discount_percent not in preset_values
+
     return {
         "results": results,
         "missing": missing,
         "team_count": len(team_tokens),
         "generated_at": time.strftime("%d.%m.%Y %H:%M:%S"),
         "error": error,
-        "discount_percent": round(discount * 100, 2),
+        "discount_percent": discount_percent,
+        "is_custom_discount": is_custom_discount,
         "chart_labels": [f"{r['team1']} vs {r['team2']}" for r in top_results],
         "chart_prices": [round(r["price_eur"], 2) for r in top_results],
         "history_enabled": history_enabled(),
