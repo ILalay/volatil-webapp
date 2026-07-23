@@ -568,6 +568,12 @@
     return str.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? params[k] : ''));
   }
 
+  // "2026-07-23T14:05:00" -> "23.07. 14:05"
+  function formatTs(ts) {
+    if (typeof ts !== 'string' || ts.length < 16) return ts;
+    return `${ts.slice(8, 10)}.${ts.slice(5, 7)}. ${ts.slice(11, 16)}`;
+  }
+
   function formatDuration(seconds) {
     if (seconds >= 86400) return fmt(T.duration_days, { n: Math.floor(seconds / 86400) });
     if (seconds >= 3600) return fmt(T.duration_hours, { n: Math.floor(seconds / 3600) });
@@ -693,7 +699,7 @@
       });
 
       // Szenarien: optimistisch (unten, günstiger) / konservativ (oben) —
-      // beide schließen wie die zentrale Prognose an den letzten echten Punkt an.
+      // standardmäßig ausgeblendet, per Klick auf die Legende einblendbar.
       const buildScenario = (values, label, color) => {
         if (!values || values.length === 0) return;
         const data = new Array(historyLabels.length - 1).fill(null);
@@ -707,13 +713,24 @@
           pointRadius: 0,
           borderWidth: 1.4,
           tension: 0,
-          fill: false
+          fill: false,
+          hidden: true
         });
       };
       buildScenario(historyPrediction.optimistic, T.prediction_optimistic_label, 'rgba(110, 231, 168, 0.65)');
       buildScenario(historyPrediction.conservative, T.prediction_conservative_label, 'rgba(232, 96, 122, 0.65)');
 
-      document.getElementById('predictionDisclaimer').classList.remove('hidden');
+      // Hinweis: Abweichung der 24h-Prognose vom aktuellen Preis in Prozent.
+      const disclaimerEl = document.getElementById('predictionDisclaimer');
+      const lastReal = historyPrices[historyPrices.length - 1];
+      const lastPred = historyPrediction.prices[historyPrediction.prices.length - 1];
+      if (lastReal) {
+        const pct = ((lastPred - lastReal) / lastReal) * 100;
+        const sign = pct > 0 ? '+' : '';
+        disclaimerEl.textContent =
+          fmt(T.prediction_deviation, { percent: `${sign}${pct.toFixed(1)} %` }) + ' ' + T.prediction_disclaimer;
+      }
+      disclaimerEl.classList.remove('hidden');
     }
 
     new Chart(historyCanvas.getContext('2d'), {
@@ -727,11 +744,19 @@
             display: hasPrediction,
             labels: { color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12 }
           },
-          tooltip: { callbacks: { label: (item) => `${item.dataset.label}: ${item.raw.toFixed(2)} ¥` } }
+          tooltip: {
+            callbacks: {
+              title: (items) => formatTs(items[0].label),
+              label: (item) => `${item.dataset.label}: ${item.raw.toFixed(2)} ¥`
+            }
+          }
         },
         scales: {
           x: {
-            ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+            ticks: {
+              color: '#7a8085', font: { family: 'JetBrains Mono' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8,
+              callback: function (value) { return formatTs(this.getLabelForValue(value)); }
+            },
             grid: { color: '#262b32' }
           },
           y: {
@@ -788,11 +813,19 @@
             maintainAspectRatio: false,
             plugins: {
               legend: { display: false },
-              tooltip: { callbacks: { label: (item) => `${item.raw.toFixed(2)} ¥` } }
+              tooltip: {
+                callbacks: {
+                  title: (items) => formatTs(items[0].label),
+                  label: (item) => `${item.raw.toFixed(2)} ¥`
+                }
+              }
             },
             scales: {
               x: {
-                ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+                ticks: {
+                  color: '#7a8085', font: { family: 'JetBrains Mono' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8,
+                  callback: function (value) { return formatTs(this.getLabelForValue(value)); }
+                },
                 grid: { color: '#262b32' }
               },
               y: {
