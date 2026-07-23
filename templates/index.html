@@ -568,10 +568,10 @@
     return str.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? params[k] : ''));
   }
 
-  // "2026-07-23T14:05:00" -> Achse: ["14:05", "23.07."] / Tooltip: "23.07.2026 · 14:05"
+  // "2026-07-23T14:05:00" -> Achse: "14:05" / Tooltip: "23.07.2026 · 14:05"
   function tsAxisLabel(ts) {
     if (typeof ts !== 'string' || ts.length < 16) return ts;
-    return [ts.slice(11, 16), `${ts.slice(8, 10)}.${ts.slice(5, 7)}.`];
+    return ts.slice(11, 16);
   }
   function tsTooltipLabel(ts) {
     if (typeof ts !== 'string' || ts.length < 16) return ts;
@@ -727,29 +727,41 @@
         fill: false
       });
 
-      // Szenarien: optimistisch (unten, günstiger) / konservativ (oben) —
-      // standardmäßig ausgeblendet, per Klick auf die Legende einblendbar.
-      const buildScenario = (values, label, color) => {
-        if (!values || values.length === 0) return;
-        const data = new Array(historyLabels.length - 1).fill(null);
-        data.push(historyPrices[historyPrices.length - 1]);
-        data.push(...values);
+      // Schwankungsband: gefüllte Fläche zwischen optimistischem und
+      // konservativem Szenario — zeigt die historisch typische Bewegung
+      // über den jeweiligen Horizont, standardmäßig sichtbar.
+      const opt = historyPrediction.optimistic;
+      const cons = historyPrediction.conservative;
+      if (opt && cons && opt.length === cons.length && opt.length > 0) {
+        const pad = () => {
+          const d = new Array(historyLabels.length - 1).fill(null);
+          d.push(historyPrices[historyPrices.length - 1]);
+          return d;
+        };
+        const lowerData = pad(); lowerData.push(...opt);
+        const upperData = pad(); upperData.push(...cons);
+        // Untere Kante (unsichtbare Linie, dient als Füllziel)
         datasets.push({
-          label,
-          data,
-          borderColor: color,
-          borderDash: [3, 3],
+          label: '_range_lower',
+          data: lowerData,
+          borderWidth: 0,
           pointRadius: 0,
-          pointHoverRadius: 4,
-          pointBackgroundColor: color,
-          borderWidth: 1.8,
-          tension: 0,
+          pointHoverRadius: 0,
           fill: false,
-          hidden: true
+          tension: 0
         });
-      };
-      buildScenario(historyPrediction.optimistic, T.prediction_optimistic_label, 'rgba(110, 231, 168, 0.95)');
-      buildScenario(historyPrediction.conservative, T.prediction_conservative_label, 'rgba(232, 96, 122, 0.95)');
+        // Obere Kante, füllt bis zur unteren
+        datasets.push({
+          label: T.prediction_range_label,
+          data: upperData,
+          borderWidth: 0,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          backgroundColor: 'rgba(242, 184, 75, 0.14)',
+          fill: '-1',
+          tension: 0
+        });
+      }
 
       // Hinweis: Abweichung der 24h-Prognose vom aktuellen Preis in Prozent.
       const disclaimerEl = document.getElementById('predictionDisclaimer');
@@ -776,9 +788,13 @@
           forecastShade: hasPrediction ? { startIndex: historyLabels.length - 1 } : {},
           legend: {
             display: hasPrediction,
-            labels: { color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12 }
+            labels: {
+              color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12,
+              filter: (item) => !item.text.startsWith('_')
+            }
           },
           tooltip: {
+            filter: (item) => !item.dataset.label.startsWith('_'),
             callbacks: {
               title: (items) => tsTooltipLabel(items[0].label),
               label: (item) => `${item.dataset.label}: ${item.raw.toFixed(2)} ¥`
