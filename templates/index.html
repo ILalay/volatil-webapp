@@ -689,11 +689,13 @@
       datasets.push({
         label: T.prediction_dataset_label,
         data: predictionData,
-        borderColor: 'rgba(242, 184, 75, 0.85)',
-        borderDash: [5, 4],
-        pointRadius: 2,
-        pointBackgroundColor: 'rgba(242, 184, 75, 0.85)',
-        borderWidth: 2,
+        borderColor: 'rgba(242, 184, 75, 1)',
+        borderDash: [6, 4],
+        pointStyle: 'triangle',
+        pointRadius: 5,
+        pointBackgroundColor: 'rgba(242, 184, 75, 1)',
+        pointBorderColor: 'rgba(242, 184, 75, 1)',
+        borderWidth: 2.5,
         tension: 0,
         fill: false
       });
@@ -709,16 +711,19 @@
           label,
           data,
           borderColor: color,
-          borderDash: [2, 3],
-          pointRadius: 0,
-          borderWidth: 1.4,
+          borderDash: [4, 4],
+          pointStyle: 'rectRot',
+          pointRadius: 4,
+          pointBackgroundColor: color,
+          pointBorderColor: color,
+          borderWidth: 2,
           tension: 0,
           fill: false,
           hidden: true
         });
       };
-      buildScenario(historyPrediction.optimistic, T.prediction_optimistic_label, 'rgba(110, 231, 168, 0.65)');
-      buildScenario(historyPrediction.conservative, T.prediction_conservative_label, 'rgba(232, 96, 122, 0.65)');
+      buildScenario(historyPrediction.optimistic, T.prediction_optimistic_label, 'rgba(110, 231, 168, 0.95)');
+      buildScenario(historyPrediction.conservative, T.prediction_conservative_label, 'rgba(232, 96, 122, 0.95)');
 
       // Hinweis: Abweichung der 24h-Prognose vom aktuellen Preis in Prozent.
       const disclaimerEl = document.getElementById('predictionDisclaimer');
@@ -742,7 +747,7 @@
         plugins: {
           legend: {
             display: hasPrediction,
-            labels: { color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12 }
+            labels: { color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12, usePointStyle: true }
           },
           tooltip: {
             callbacks: {
