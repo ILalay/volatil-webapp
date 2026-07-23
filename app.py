@@ -118,8 +118,10 @@ TRANSLATIONS = {
         "duration_hours": "{n} Stunden",
         "duration_minutes": "{n} Minuten",
         "duration_moment": "gerade eben",
-        "prediction_dataset_label": "Prognose (linear)",
-        "prediction_disclaimer": "Einfache lineare Fortschreibung des bisherigen Verlaufs — keine verlässliche Vorhersage der tatsächlichen Preisentwicklung.",
+        "prediction_dataset_label": "Prognose (Modell)",
+        "prediction_optimistic_label": "Optimistisch (günstig)",
+        "prediction_conservative_label": "Konservativ",
+        "prediction_disclaimer": "Statistische Fortschreibung (Trend + Tageszeitprofil) mit optimistischem und konservativem Szenario aus historischen Abweichungen — keine verlässliche Vorhersage der tatsächlichen Preisentwicklung.",
     },
     "en": {
         "eyebrow": "Volatile Shop · Gold Team Stickers",
@@ -164,8 +166,10 @@ TRANSLATIONS = {
         "duration_hours": "{n} hours",
         "duration_minutes": "{n} minutes",
         "duration_moment": "just now",
-        "prediction_dataset_label": "Forecast (linear)",
-        "prediction_disclaimer": "A simple linear extrapolation of the past trend — not a reliable prediction of actual future prices.",
+        "prediction_dataset_label": "Forecast (model)",
+        "prediction_optimistic_label": "Optimistic (cheaper)",
+        "prediction_conservative_label": "Conservative",
+        "prediction_disclaimer": "Statistical extrapolation (trend + time-of-day profile) with optimistic and conservative scenarios derived from historical deviations — not a reliable prediction of actual future prices.",
     },
     "zh": {
         "eyebrow": "Volatile Shop · 金色战队贴纸",
@@ -210,8 +214,10 @@ TRANSLATIONS = {
         "duration_hours": "{n} 小时",
         "duration_minutes": "{n} 分钟",
         "duration_moment": "刚刚",
-        "prediction_dataset_label": "预测（线性）",
-        "prediction_disclaimer": "仅基于历史走势的简单线性推算——并非对未来价格的可靠预测。",
+        "prediction_dataset_label": "预测（模型）",
+        "prediction_optimistic_label": "乐观（更便宜）",
+        "prediction_conservative_label": "保守",
+        "prediction_disclaimer": "基于趋势和时段特征的统计推算，并根据历史偏差给出乐观与保守两种情景——并非对未来价格的可靠预测。",
     },
 }
 
@@ -541,46 +547,179 @@ def _parse_ts(ts):
     return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
 
 
+def _holt_damped_fit(ys, alpha, beta, phi):
+    """Gedämpftes Holt-Verfahren (Level + Trend) über eine als gleichabständig
+    behandelte Serie. Liefert (level, trend, residuals) — die Residuen sind die
+    Fehler der einschrittigen Vorhersagen und dienen Backtest + Konfidenzband."""
+    level = ys[0]
+    trend = ys[1] - ys[0]
+    residuals = []
+    for y in ys[1:]:
+        forecast = level + phi * trend
+        residuals.append(y - forecast)
+        new_level = alpha * y + (1 - alpha) * (level + phi * trend)
+        trend = beta * (new_level - level) + (1 - beta) * phi * trend
+        level = new_level
+    return level, trend, residuals
+
+
+def _holt_damped_best(ys, phi=0.9):
+    """Kleiner Grid-Search über Glättungsparameter, minimiert den MAE der
+    einschrittigen Vorhersagen."""
+    best = None
+    for alpha in (0.2, 0.4, 0.6):
+        for beta in (0.05, 0.15, 0.3):
+            level, trend, residuals = _holt_damped_fit(ys, alpha, beta, phi)
+            mae = sum(abs(r) for r in residuals) / len(residuals)
+            if best is None or mae < best["mae"]:
+                best = {
+                    "level": level,
+                    "trend": trend,
+                    "residuals": residuals,
+                    "mae": mae,
+                    "phi": phi,
+                }
+    return best
+
+
+def _seasonal_slot(dt):
+    """3-Stunden-Block der Tageszeit (0-7)."""
+    return dt.hour // 3
+
+
+def _seasonal_profile(timestamps, prices):
+    """Additives Tageszeitprofil: Preise werden mit einem zentrierten gleitenden
+    Tagesmittel detrended, die Abweichungen pro 3h-Block gesammelt und je Block
+    der Median gebildet. Blöcke mit < 2 Beobachtungen erhalten 0 (neutral)."""
+    n = len(prices)
+    span_h = (timestamps[-1] - timestamps[0]).total_seconds() / 3600.0
+    if span_h <= 0:
+        return None
+    avg_interval_h = span_h / (n - 1)
+    window = max(3, round(24.0 / avg_interval_h))  # ~1 Tag an Punkten
+    half = window // 2
+
+    deviations = {}
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        local_mean = sum(prices[lo:hi]) / (hi - lo)
+        slot = _seasonal_slot(timestamps[i])
+        deviations.setdefault(slot, []).append(prices[i] - local_mean)
+
+    profile = {}
+    for slot in range(8):
+        vals = sorted(deviations.get(slot, []))
+        if len(vals) < 2:
+            profile[slot] = 0.0
+            continue
+        m = len(vals)
+        profile[slot] = (
+            vals[m // 2] if m % 2 else (vals[m // 2 - 1] + vals[m // 2]) / 2
+        )
+    return profile
+
+
+def _quantile(sorted_vals, q):
+    """Empirisches Quantil (lineare Interpolation) einer sortierten Liste."""
+    if not sorted_vals:
+        return 0.0
+    pos = q * (len(sorted_vals) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    frac = pos - lo
+    return sorted_vals[lo] * (1 - frac) + sorted_vals[hi] * frac
+
+
 def compute_price_prediction(history, future_points=6, horizon_hours=24):
-    """Sehr einfache lineare Regression über den Verlauf der günstigsten
-    Kombination — keine echte Vorhersage, nur eine grobe statistische
-    Fortschreibung des bisherigen Trends."""
+    """Prognose der günstigsten Kombination: gedämpftes Holt-Verfahren
+    (Level + Trend) plus optionales additives Tageszeitprofil (3h-Blöcke).
+
+    Das Profil wird nur angewendet, wenn es im Backtest den mittleren
+    einschrittigen Fehler (MAE) um mindestens 5 % senkt — sonst fällt das
+    Modell automatisch auf reines Level+Trend zurück.
+
+    Zusätzlich werden zwei Szenarien aus den empirischen Residuen-Quantilen
+    abgeleitet: optimistisch (20 %-Quantil, aus Käufersicht = günstiger) und
+    konservativ (80 %-Quantil). Die Spreizung wächst mit dem Horizont.
+    Keine verlässliche Vorhersage — nur eine statistische Fortschreibung."""
     if len(history) < 5:
         return None
 
     try:
         timestamps = [_parse_ts(h["timestamp"]) for h in history]
-    except (KeyError, ValueError):
+        prices = [float(h["cheapest_price"]) for h in history]
+    except (KeyError, TypeError, ValueError):
         return None
 
-    prices = [h["cheapest_price"] for h in history]
-    t0 = timestamps[0]
-    xs = [(ts - t0).total_seconds() / 3600.0 for ts in timestamps]  # Stunden seit erstem Punkt
-    ys = prices
+    # --- Variante A: reines Level+Trend auf den Rohpreisen -----------------
+    model_plain = _holt_damped_best(prices)
 
-    n = len(xs)
-    mean_x = sum(xs) / n
-    mean_y = sum(ys) / n
-    denom = sum((x - mean_x) ** 2 for x in xs)
-    if denom == 0:
-        return None
+    # --- Variante B: Level+Trend auf saisonbereinigter Serie ---------------
+    profile = _seasonal_profile(timestamps, prices)
+    model_seasonal = None
+    if profile is not None:
+        adjusted = [
+            p - profile[_seasonal_slot(ts)] for ts, p in zip(timestamps, prices)
+        ]
+        fitted = _holt_damped_best(adjusted)
+        # Backtest-Residuen zurück auf die Originalskala: der einschrittige
+        # Fehler in der bereinigten Serie entspricht dem Fehler der
+        # Gesamtvorhersage (Holt + Profil) gegen den echten Preis.
+        model_seasonal = fitted
 
-    slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / denom
-    intercept = mean_y - slope * mean_x
+    # --- Signifikanz-Check: Profil nur bei >= 5 % MAE-Verbesserung ---------
+    seasonality_used = (
+        model_seasonal is not None
+        and model_seasonal["mae"] <= 0.95 * model_plain["mae"]
+    )
+    model = model_seasonal if seasonality_used else model_plain
 
-    last_x = xs[-1]
+    # --- Punktprognose ------------------------------------------------------
+    phi = model["phi"]
     step = horizon_hours / future_points
+    last_ts = timestamps[-1]
 
     future_labels = []
-    future_prices = []
+    central = []
+    damp_sum = 0.0
     for i in range(1, future_points + 1):
-        fx = last_x + step * i
-        fy = intercept + slope * fx
-        future_ts = t0 + timedelta(hours=fx)
+        damp_sum += phi ** i
+        base = model["level"] + model["trend"] * damp_sum
+        future_ts = last_ts + timedelta(hours=step * i)
+        if seasonality_used:
+            base += profile[_seasonal_slot(future_ts)]
         future_labels.append(future_ts.strftime("%Y-%m-%dT%H:%M:%S"))
-        future_prices.append(round(max(fy, 0), 2))
+        central.append(max(base, 0.0))
 
-    return {"labels": future_labels, "prices": future_prices}
+    # --- Szenarien aus Residuen-Quantilen ----------------------------------
+    sorted_res = sorted(model["residuals"])
+    q_low = _quantile(sorted_res, 0.2)   # typischerweise negativ
+    q_high = _quantile(sorted_res, 0.8)  # typischerweise positiv
+    # Anzahl einschrittiger Intervalle, die ein Prognoseschritt abdeckt —
+    # die Unsicherheit wächst näherungsweise mit der Wurzel des Horizonts.
+    span_h = (timestamps[-1] - timestamps[0]).total_seconds() / 3600.0
+    avg_interval_h = max(span_h / (len(prices) - 1), 1e-6)
+    steps_per_point = step / avg_interval_h
+
+    optimistic = []
+    conservative = []
+    for i, base in enumerate(central, start=1):
+        scale = (i * steps_per_point) ** 0.5
+        optimistic.append(max(base + q_low * scale, 0.0))
+        conservative.append(max(base + q_high * scale, 0.0))
+
+    return {
+        "labels": future_labels,
+        "prices": [round(p, 2) for p in central],
+        "optimistic": [round(p, 2) for p in optimistic],
+        "conservative": [round(p, 2) for p in conservative],
+        "seasonality_used": seasonality_used,
+        "mae": round(model_plain["mae"], 3),
+        "mae_seasonal": (
+            round(model_seasonal["mae"], 3) if model_seasonal else None
+        ),
+    }
 
 
 def compute_facts(history):
