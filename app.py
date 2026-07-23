@@ -101,6 +101,7 @@ TRANSLATIONS = {
         "panel_top15_title": "Günstigste {n} Matches im Preisvergleich",
         "table_match": "Match",
         "table_history": "Verlauf",
+        "table_change_24h": "24h",
         "table_tokens": "Tokens",
         "table_price": "Preis",
         "missing_label": "Nicht gefunden:",
@@ -149,6 +150,7 @@ TRANSLATIONS = {
         "panel_top15_title": "Cheapest {n} matches compared",
         "table_match": "Match",
         "table_history": "Trend",
+        "table_change_24h": "24h",
         "table_tokens": "Tokens",
         "table_price": "Price",
         "missing_label": "Not found:",
@@ -197,6 +199,7 @@ TRANSLATIONS = {
         "panel_top15_title": "最便宜的 {n} 场比赛对比",
         "table_match": "比赛",
         "table_history": "走势",
+        "table_change_24h": "24h",
         "table_tokens": "代币",
         "table_price": "价格",
         "missing_label": "未找到：",
@@ -862,6 +865,43 @@ def compute_facts(history):
     return facts[:4]
 
 
+def compute_match_changes(history, hours=24):
+    """24h-Preisänderung in Prozent pro Match aus den History-Snapshots.
+    Die History nutzt zwar einen fixen Referenz-Rabatt, aber da der Rabatt
+    multiplikativ wirkt, ist die prozentuale Änderung rabattunabhängig."""
+    if len(history) < 2:
+        return {}
+    try:
+        now_dt = _parse_ts(history[-1]["timestamp"])
+    except (KeyError, ValueError):
+        return {}
+    target_dt = now_dt - timedelta(hours=hours)
+
+    changes = {}
+    series = {}
+    for snap in history:
+        try:
+            dt = _parse_ts(snap["timestamp"])
+        except (KeyError, ValueError):
+            continue
+        for idx, price in snap.get("prices", {}).items():
+            series.setdefault(idx, []).append((dt, price))
+
+    for idx, pts in series.items():
+        if len(pts) < 2:
+            continue
+        current = pts[-1][1]
+        ref = pts[0][1]  # Fallback: ältester Punkt
+        for dt, price in pts:
+            if dt <= target_dt:
+                ref = price
+            else:
+                break
+        if ref:
+            changes[idx] = round((current - ref) / ref * 100, 1)
+    return changes
+
+
 def build_sparklines(results, history):
     if not history:
         return {}
@@ -894,8 +934,10 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     history = _cache["history"]
 
     sparklines = build_sparklines(results, history)
+    changes = compute_match_changes(history)
     for r in results:
         r["sparkline_svg"] = sparklines.get(r["match_index"], "")
+        r["change_24h_pct"] = changes.get(str(r["match_index"]))
 
     match_options = sorted(
         (
