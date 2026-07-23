@@ -118,6 +118,8 @@ TRANSLATIONS = {
         "duration_hours": "{n} Stunden",
         "duration_minutes": "{n} Minuten",
         "duration_moment": "gerade eben",
+        "prediction_dataset_label": "Prognose (linear)",
+        "prediction_disclaimer": "Einfache lineare Fortschreibung des bisherigen Verlaufs — keine verlässliche Vorhersage der tatsächlichen Preisentwicklung.",
     },
     "en": {
         "eyebrow": "Volatile Shop · Gold Team Stickers",
@@ -162,6 +164,8 @@ TRANSLATIONS = {
         "duration_hours": "{n} hours",
         "duration_minutes": "{n} minutes",
         "duration_moment": "just now",
+        "prediction_dataset_label": "Forecast (linear)",
+        "prediction_disclaimer": "A simple linear extrapolation of the past trend — not a reliable prediction of actual future prices.",
     },
     "zh": {
         "eyebrow": "Volatile Shop · 金色战队贴纸",
@@ -206,6 +210,8 @@ TRANSLATIONS = {
         "duration_hours": "{n} 小时",
         "duration_minutes": "{n} 分钟",
         "duration_moment": "刚刚",
+        "prediction_dataset_label": "预测（线性）",
+        "prediction_disclaimer": "仅基于历史走势的简单线性推算——并非对未来价格的可靠预测。",
     },
 }
 
@@ -535,6 +541,48 @@ def _parse_ts(ts):
     return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
 
 
+def compute_price_prediction(history, future_points=6, horizon_hours=24):
+    """Sehr einfache lineare Regression über den Verlauf der günstigsten
+    Kombination — keine echte Vorhersage, nur eine grobe statistische
+    Fortschreibung des bisherigen Trends."""
+    if len(history) < 5:
+        return None
+
+    try:
+        timestamps = [_parse_ts(h["timestamp"]) for h in history]
+    except (KeyError, ValueError):
+        return None
+
+    prices = [h["cheapest_price"] for h in history]
+    t0 = timestamps[0]
+    xs = [(ts - t0).total_seconds() / 3600.0 for ts in timestamps]  # Stunden seit erstem Punkt
+    ys = prices
+
+    n = len(xs)
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    denom = sum((x - mean_x) ** 2 for x in xs)
+    if denom == 0:
+        return None
+
+    slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / denom
+    intercept = mean_y - slope * mean_x
+
+    last_x = xs[-1]
+    step = horizon_hours / future_points
+
+    future_labels = []
+    future_prices = []
+    for i in range(1, future_points + 1):
+        fx = last_x + step * i
+        fy = intercept + slope * fx
+        future_ts = t0 + timedelta(hours=fx)
+        future_labels.append(future_ts.strftime("%Y-%m-%dT%H:%M:%S"))
+        future_prices.append(round(max(fy, 0), 2))
+
+    return {"labels": future_labels, "prices": future_prices}
+
+
 def compute_facts(history):
     """Berechnet ein paar kurze, 'Twitter-artige' Fakten aus der History.
     Liefert strukturierte Daten (sprachneutral) — Formatierung passiert im
@@ -709,6 +757,7 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "history_labels": [h["timestamp"] for h in history],
         "history_prices": [h["cheapest_price"] for h in history],
         "history_stats": compute_history_stats(history),
+        "history_prediction": compute_price_prediction(history),
         "match_options": match_options,
         "facts": compute_facts(history),
         "t": TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]),
