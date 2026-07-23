@@ -692,6 +692,27 @@
         fill: false
       });
 
+      // Szenarien: optimistisch (unten, günstiger) / konservativ (oben) —
+      // beide schließen wie die zentrale Prognose an den letzten echten Punkt an.
+      const buildScenario = (values, label, color) => {
+        if (!values || values.length === 0) return;
+        const data = new Array(historyLabels.length - 1).fill(null);
+        data.push(historyPrices[historyPrices.length - 1]);
+        data.push(...values);
+        datasets.push({
+          label,
+          data,
+          borderColor: color,
+          borderDash: [2, 3],
+          pointRadius: 0,
+          borderWidth: 1.4,
+          tension: 0,
+          fill: false
+        });
+      };
+      buildScenario(historyPrediction.optimistic, T.prediction_optimistic_label, 'rgba(110, 231, 168, 0.65)');
+      buildScenario(historyPrediction.conservative, T.prediction_conservative_label, 'rgba(232, 96, 122, 0.65)');
+
       document.getElementById('predictionDisclaimer').classList.remove('hidden');
     }
 
