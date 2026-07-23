@@ -107,6 +107,17 @@ TRANSLATIONS = {
         "footer_text": "Rabatt {percent} % · Kurs: 100 Tokens = 153 ¥",
         "price_dataset_label": "Preis (¥)",
         "cheapest_dataset_label": "Günstigster Preis (¥)",
+        "facts_title": "Fakten",
+        "loading_text": "Lade Preise …",
+        "fact_never_changed": "Der Preis von {match} hat sich seit {duration} nicht verändert.",
+        "fact_longest_expensive": "{match} ist seit {duration} durchgehend das teuerste Match ({price} ¥).",
+        "fact_longest_cheapest": "{match} ist seit {duration} durchgehend das günstigste Match ({price} ¥).",
+        "fact_mover_up": "{match} ist in den letzten 24h am stärksten gestiegen: +{percent}%.",
+        "fact_mover_down": "{match} ist in den letzten 24h am stärksten gefallen: {percent}%.",
+        "duration_days": "{n} Tagen",
+        "duration_hours": "{n} Stunden",
+        "duration_minutes": "{n} Minuten",
+        "duration_moment": "gerade eben",
     },
     "en": {
         "eyebrow": "Volatile Shop · Gold Team Stickers",
@@ -140,6 +151,17 @@ TRANSLATIONS = {
         "footer_text": "Discount {percent}% · Rate: 100 tokens = ¥153",
         "price_dataset_label": "Price (¥)",
         "cheapest_dataset_label": "Cheapest price (¥)",
+        "facts_title": "Facts",
+        "loading_text": "Loading prices …",
+        "fact_never_changed": "The price of {match} hasn't changed in {duration}.",
+        "fact_longest_expensive": "{match} has been the most expensive match for {duration} ({price} ¥).",
+        "fact_longest_cheapest": "{match} has been the cheapest match for {duration} ({price} ¥).",
+        "fact_mover_up": "{match} rose the most in the last 24h: +{percent}%.",
+        "fact_mover_down": "{match} fell the most in the last 24h: {percent}%.",
+        "duration_days": "{n} days",
+        "duration_hours": "{n} hours",
+        "duration_minutes": "{n} minutes",
+        "duration_moment": "just now",
     },
     "zh": {
         "eyebrow": "Volatile Shop · 金色战队贴纸",
@@ -173,6 +195,17 @@ TRANSLATIONS = {
         "footer_text": "折扣 {percent}% · 汇率：100代币 = ¥153",
         "price_dataset_label": "价格 (¥)",
         "cheapest_dataset_label": "最低价格 (¥)",
+        "facts_title": "趣味数据",
+        "loading_text": "正在加载价格 …",
+        "fact_never_changed": "{match} 的价格已经 {duration} 没有变化了。",
+        "fact_longest_expensive": "{match} 已经连续 {duration} 是最贵的比赛（{price} ¥）。",
+        "fact_longest_cheapest": "{match} 已经连续 {duration} 是最便宜的比赛（{price} ¥）。",
+        "fact_mover_up": "{match} 在过去24小时内涨幅最大：+{percent}%。",
+        "fact_mover_down": "{match} 在过去24小时内跌幅最大：{percent}%。",
+        "duration_days": "{n} 天",
+        "duration_hours": "{n} 小时",
+        "duration_minutes": "{n} 分钟",
+        "duration_moment": "刚刚",
     },
 }
 
@@ -498,6 +531,123 @@ def build_sparkline_svg(prices, width=90, height=26):
     )
 
 
+def _parse_ts(ts):
+    return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+
+
+def compute_facts(history):
+    """Berechnet ein paar kurze, 'Twitter-artige' Fakten aus der History.
+    Liefert strukturierte Daten (sprachneutral) — Formatierung passiert im
+    Frontend anhand der aktuellen Sprache."""
+    if len(history) < 3:
+        return []
+
+    matches = load_matches()
+
+    def label_for(idx):
+        m = matches[int(idx)]
+        return f"{m['team1']} vs {m['team2']}"
+
+    series = {}
+    for snap in history:
+        for idx, price in snap.get("prices", {}).items():
+            series.setdefault(idx, []).append((snap["timestamp"], price))
+
+    now_dt = _parse_ts(history[-1]["timestamp"])
+
+    def duration_seconds(ts_start):
+        return (now_dt - _parse_ts(ts_start)).total_seconds()
+
+    facts = []
+
+    # Fakt: Preis hat sich nie verändert (längste Serie mit min. 3 Punkten)
+    unchanged = [
+        (idx, pts) for idx, pts in series.items()
+        if len(pts) >= 3 and len({p for _, p in pts}) == 1
+    ]
+    if unchanged:
+        idx, pts = max(unchanged, key=lambda x: len(x[1]))
+        facts.append({
+            "type": "never_changed",
+            "match": label_for(idx),
+            "duration_seconds": duration_seconds(pts[0][0]),
+            "price": pts[-1][1],
+        })
+
+    # Fakten: aktuelle Serie als teuerstes / günstigstes Match
+    expensive_seq = []
+    cheap_seq = []
+    for snap in history:
+        prices = snap.get("prices", {})
+        if not prices:
+            continue
+        max_idx = max(prices, key=lambda k: prices[k])
+        min_idx = min(prices, key=lambda k: prices[k])
+        expensive_seq.append((snap["timestamp"], max_idx, prices[max_idx]))
+        cheap_seq.append((snap["timestamp"], min_idx, prices[min_idx]))
+
+    def current_streak(seq):
+        if not seq:
+            return None
+        last_idx = seq[-1][1]
+        streak = [seq[-1]]
+        for item in reversed(seq[:-1]):
+            if item[1] == last_idx:
+                streak.append(item)
+            else:
+                break
+        streak.reverse()
+        return last_idx, streak
+
+    result = current_streak(expensive_seq)
+    if result:
+        idx, streak = result
+        if len(streak) >= 2:
+            facts.append({
+                "type": "longest_expensive",
+                "match": label_for(idx),
+                "duration_seconds": duration_seconds(streak[0][0]),
+                "price": streak[-1][2],
+            })
+
+    result = current_streak(cheap_seq)
+    if result:
+        idx, streak = result
+        if len(streak) >= 2:
+            facts.append({
+                "type": "longest_cheapest",
+                "match": label_for(idx),
+                "duration_seconds": duration_seconds(streak[0][0]),
+                "price": streak[-1][2],
+            })
+
+    # Fakt: größter Ausschlag in ~24h
+    target_dt = now_dt - timedelta(hours=24)
+    best_idx, best_pct, best_current = None, 0, None
+    for idx, pts in series.items():
+        current_price = pts[-1][1]
+        ref_price = pts[0][1]
+        for ts, p in pts:
+            if _parse_ts(ts) <= target_dt:
+                ref_price = p
+            else:
+                break
+        if ref_price:
+            pct = (current_price - ref_price) / ref_price * 100
+            if abs(pct) > abs(best_pct):
+                best_pct, best_idx, best_current = pct, idx, current_price
+
+    if best_idx is not None and abs(best_pct) >= 0.5:
+        facts.append({
+            "type": "mover_up" if best_pct > 0 else "mover_down",
+            "match": label_for(best_idx),
+            "percent": round(best_pct, 1),
+            "price": best_current,
+        })
+
+    return facts[:4]
+
+
 def build_sparklines(results, history):
     if not history:
         return {}
@@ -560,6 +710,7 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "history_prices": [h["cheapest_price"] for h in history],
         "history_stats": compute_history_stats(history),
         "match_options": match_options,
+        "facts": compute_facts(history),
         "t": TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]),
         "current_lang": lang,
         "supported_langs": SUPPORTED_LANGS,
@@ -570,12 +721,24 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
 
 def render_with_lang(force_token_refresh=False):
     lang = resolve_lang()
-    try:
-        data = build_page_data(force_token_refresh=force_token_refresh, lang=lang)
-    except Exception as exc:  # noqa: BLE001 - bewusst breit, um Fehlerseite zu zeigen
-        return render_template("error.html", message=str(exc)), 500
+    discount = parse_discount(request.args.get("discount"))
+    discount_percent = round(discount * 100, 2)
+    preset_values = {p["discount"] for p in DISCOUNT_PRESETS}
+    is_custom_discount = discount_percent not in preset_values
 
-    resp = make_response(render_template("index.html", **data))
+    resp = make_response(
+        render_template(
+            "index.html",
+            t=TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]),
+            current_lang=lang,
+            supported_langs=SUPPORTED_LANGS,
+            lang_labels=LANG_LABELS,
+            discount_presets=DISCOUNT_PRESETS,
+            discount_percent=discount_percent,
+            is_custom_discount=is_custom_discount,
+            history_enabled=history_enabled(),
+        )
+    )
     resp.set_cookie("lang", lang, max_age=60 * 60 * 24 * 365)
     return resp
 
@@ -586,7 +749,27 @@ def render_with_lang(force_token_refresh=False):
 
 @app.route("/")
 def index():
+    # Rendert die Seite SOFORT (Shell + Skeleton), ohne auf die externe
+    # Preis-API zu warten. Die eigentlichen Daten lädt der Browser danach
+    # per /api/page-data nach — dadurch hängt die Seite auch bei einem
+    # Render-Kaltstart oder einer langsamen Volatile-Shop-API nicht.
     return render_with_lang()
+
+
+@app.route("/api/page-data")
+def api_page_data():
+    lang = resolve_lang()
+    try:
+        data = build_page_data(lang=lang)
+    except Exception as exc:  # noqa: BLE001 - Fehler ans Frontend durchreichen statt 500
+        return {"error": str(exc)}
+
+    data.pop("t", None)
+    data.pop("supported_langs", None)
+    data.pop("lang_labels", None)
+    data.pop("discount_presets", None)
+    data.pop("current_lang", None)
+    return data
 
 
 @app.route("/api/history/<int:match_index>")
@@ -606,7 +789,14 @@ def api_match_history(match_index):
 
 @app.route("/refresh")
 def refresh():
-    return render_with_lang(force_token_refresh=True)
+    # Leichtgewichtiger Endpunkt, gedacht für einen externen Cron-Dienst
+    # (z. B. cron-job.org), der die Preise auch ohne offenen Browser-Tab
+    # periodisch aktualisiert.
+    try:
+        get_team_tokens(force=True)
+        return {"status": "ok", "generated_at": time.strftime("%d.%m.%Y %H:%M:%S")}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "message": str(exc)}, 500
 
 
 if __name__ == "__main__":
