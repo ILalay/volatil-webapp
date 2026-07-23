@@ -86,8 +86,6 @@
     margin-top: 0.8rem;
   }
 
-  .subline b { color: var(--text); }
-
   .toolbar {
     display: flex;
     flex-direction: column;
@@ -98,6 +96,30 @@
 
   .hidden {
     display: none !important;
+  }
+
+  .presets-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+  }
+
+  .preset-btn {
+    border: 1px solid var(--preset-color, var(--panel-border));
+    background: color-mix(in srgb, var(--preset-color, var(--panel-border)) 14%, transparent);
+    color: var(--preset-color, var(--text));
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    padding: 0.32rem 0.55rem;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease;
+  }
+
+  .preset-btn:hover {
+    background: color-mix(in srgb, var(--preset-color, var(--panel-border)) 28%, transparent);
   }
 
   .discount-form {
@@ -153,36 +175,55 @@
 
   .discount-form button:hover { background: #2c5940; }
 
-  .presets-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    align-items: center;
-  }
-
-  .preset-btn {
-    border: 1px solid var(--preset-color, var(--panel-border));
-    background: color-mix(in srgb, var(--preset-color, var(--panel-border)) 14%, transparent);
-    color: var(--preset-color, var(--text));
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem;
-    padding: 0.32rem 0.55rem;
-    border-radius: 3px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.15s ease;
-  }
-
-  .preset-btn:hover {
-    background: color-mix(in srgb, var(--preset-color, var(--panel-border)) 28%, transparent);
-  }
-
   main {
     max-width: 980px;
     margin: 0 auto;
     padding: 1.8rem 1.5rem 0;
   }
 
+  /* ---- Skeleton / Shimmer ---- */
+  @keyframes shimmer {
+    0% { background-position: -200px 0; }
+    100% { background-position: calc(200px + 100%) 0; }
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, #1b1f26 25%, #232832 37%, #1b1f26 63%);
+    background-size: 400% 100%;
+    animation: shimmer 1.4s ease infinite;
+    border-radius: 4px;
+    color: transparent !important;
+  }
+
+  .skeleton-line {
+    height: 0.9rem;
+    width: 100%;
+  }
+
+  /* ---- Facts ---- */
+  .facts {
+    margin-bottom: 1.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .fact-card {
+    border: 1px solid var(--panel-border);
+    border-left: 3px solid var(--good);
+    border-radius: 4px;
+    background: var(--panel);
+    padding: 0.65rem 0.9rem;
+    font-size: 0.82rem;
+    color: var(--text);
+  }
+
+  .fact-card.skeleton-fact {
+    border-left-color: var(--panel-border);
+    height: 2.4rem;
+  }
+
+  /* ---- Charts / Panels ---- */
   .board {
     border: 1px solid var(--panel-border);
     border-radius: 6px;
@@ -398,9 +439,9 @@
   <p class="eyebrow">{{ t.eyebrow }}</p>
   <h1>{{ t.title }}</h1>
   <div class="subline">
-    <span>{{ t.teams_loaded.format(count=team_count) }}</span>
-    <span>{{ t.matches_calculated.format(count=results|length) }}</span>
-    <span>{{ t.generated_at.format(time=generated_at) }}</span>
+    <span id="teamsLoaded" class="skeleton skeleton-line" style="width: 8rem;">&nbsp;</span>
+    <span id="matchesCalculated" class="skeleton skeleton-line" style="width: 9rem;">&nbsp;</span>
+    <span id="generatedAt" class="skeleton skeleton-line" style="width: 11rem;">&nbsp;</span>
   </div>
 
   <div class="toolbar">
@@ -421,10 +462,12 @@
 </header>
 
 <main>
-  {% if error %}
-  <div class="error-banner">
-    {{ t.error_banner }}<br>
-    {{ error }}
+  <div id="errorBanner" class="error-banner hidden"></div>
+
+  {% if history_enabled %}
+  <div class="facts" id="factsSection">
+    <div class="fact-card skeleton-fact skeleton"></div>
+    <div class="fact-card skeleton-fact skeleton"></div>
   </div>
   {% endif %}
 
@@ -435,60 +478,19 @@
       <span class="chart-toggle">▼</span>
     </div>
     <div class="chart-panel-body">
-      {% if history_stats %}
-      <div class="stats-grid">
-        <div class="stat-box">
-          <div class="label">{{ t.stat_current }}</div>
-          <div class="value">{{ "%.2f"|format(history_stats.current) }} ¥</div>
-        </div>
-        <div class="stat-box">
-          <div class="label">{{ t.stat_change }}</div>
-          {% if history_stats.change_abs is not none %}
-          <div class="value {% if history_stats.change_abs > 0 %}pos{% elif history_stats.change_abs < 0 %}neg{% endif %}">
-            {{ "%+.2f"|format(history_stats.change_abs) }} ¥
-            {% if history_stats.change_pct is not none %}({{ "%+.1f"|format(history_stats.change_pct) }}%){% endif %}
-          </div>
-          {% else %}
-          <div class="value">–</div>
-          {% endif %}
-        </div>
-        <div class="stat-box">
-          <div class="label">{{ t.stat_change_24h }}</div>
-          {% if history_stats.change_24h_abs is not none %}
-          <div class="value {% if history_stats.change_24h_abs > 0 %}pos{% elif history_stats.change_24h_abs < 0 %}neg{% endif %}">
-            {{ "%+.2f"|format(history_stats.change_24h_abs) }} ¥
-            {% if history_stats.change_24h_pct is not none %}({{ "%+.1f"|format(history_stats.change_24h_pct) }}%){% endif %}
-          </div>
-          {% else %}
-          <div class="value">–</div>
-          {% endif %}
-        </div>
-        <div class="stat-box">
-          <div class="label">{{ t.stat_min }}</div>
-          <div class="value">{{ "%.2f"|format(history_stats.min) }} ¥</div>
-        </div>
-        <div class="stat-box">
-          <div class="label">{{ t.stat_max }}</div>
-          <div class="value">{{ "%.2f"|format(history_stats.max) }} ¥</div>
-        </div>
-        <div class="stat-box">
-          <div class="label">{{ t.stat_avg }}</div>
-          <div class="value">{{ "%.2f"|format(history_stats.avg) }} ¥</div>
-        </div>
-        <div class="stat-box">
-          <div class="label">{{ t.stat_points }}</div>
-          <div class="value">{{ history_stats.count }}</div>
-        </div>
+      <div id="historyStatsGrid" class="stats-grid hidden">
+        <div class="stat-box"><div class="label">{{ t.stat_current }}</div><div class="value" id="statCurrent">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_change }}</div><div class="value" id="statChange">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_change_24h }}</div><div class="value" id="statChange24h">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_min }}</div><div class="value" id="statMin">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_max }}</div><div class="value" id="statMax">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_avg }}</div><div class="value" id="statAvg">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_points }}</div><div class="value" id="statPoints">–</div></div>
       </div>
-      {% endif %}
-
-      {% if history_labels|length > 1 %}
-      <canvas id="historyChart" height="90"></canvas>
-      {% else %}
-      <p style="color: var(--muted); font-size: 0.82rem; margin: 0;">
+      <canvas id="historyChart" height="90" class="hidden"></canvas>
+      <p id="historyNotEnough" style="color: var(--muted); font-size: 0.82rem; margin: 0;">
         {{ t.history_not_enough }}
       </p>
-      {% endif %}
     </div>
   </div>
   {% endif %}
@@ -500,11 +502,7 @@
       <span class="chart-toggle">▼</span>
     </div>
     <div class="chart-panel-body">
-      <select id="matchSelect" class="match-select">
-        {% for opt in match_options %}
-        <option value="{{ opt.index }}">{{ opt.label }}</option>
-        {% endfor %}
-      </select>
+      <select id="matchSelect" class="match-select"></select>
       <canvas id="matchHistoryChart" height="100"></canvas>
       <p id="matchHistoryEmpty" style="color: var(--muted); font-size: 0.82rem; margin-top: 0.8rem; display: none;">
         {{ t.match_history_empty }}
@@ -515,7 +513,7 @@
 
   <div class="chart-panel collapsed" id="panel-top15">
     <div class="chart-panel-header" onclick="togglePanel('panel-top15')">
-      <h2>{{ t.panel_top15_title.format(n=chart_labels|length) }}</h2>
+      <h2 id="top15Title">{{ t.panel_top15_title.format(n=0) }}</h2>
       <span class="chart-toggle">▼</span>
     </div>
     <div class="chart-panel-body">
@@ -531,28 +529,22 @@
       <span style="text-align:right;">{{ t.table_tokens }}</span>
       <span style="text-align:right;">{{ t.table_price }}</span>
     </div>
-    {% for m in results %}
-    <div class="row {% if loop.index <= 3 %}top{% endif %}">
-      <span class="rank">{{ "%02d"|format(loop.index) }}</span>
-      <span class="team">{{ m.team1 }} <span class="vs">vs</span> {{ m.team2 }}</span>
-      <span class="sparkline-cell">
-        {% if m.sparkline_svg %}
-        {{ m.sparkline_svg | safe }}
-        {% else %}
-        <span class="no-data">–</span>
-        {% endif %}
-      </span>
-      <span class="tokens">{{ "%.0f"|format(m.tokens) }}</span>
-      <span class="price">{{ "%.2f"|format(m.price_eur) }} ¥</span>
+    <div id="tableBody">
+      {% for i in range(8) %}
+      <div class="row">
+        <span class="rank">{{ "%02d"|format(i+1) }}</span>
+        <span class="team skeleton skeleton-line" style="width: 60%;">&nbsp;</span>
+        <span class="sparkline-cell"></span>
+        <span class="tokens skeleton skeleton-line"></span>
+        <span class="price skeleton skeleton-line"></span>
+      </div>
+      {% endfor %}
     </div>
-    {% endfor %}
   </div>
 
-  {% if missing %}
-  <div class="missing">
-    <b>{{ t.missing_label }}</b> {{ missing|join(", ") }}
+  <div id="missingBox" class="missing hidden">
+    <b>{{ t.missing_label }}</b> <span class="missing-list"></span>
   </div>
-  {% endif %}
 </main>
 
 <footer>
@@ -562,12 +554,36 @@
 </body>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
-  const chartLabels = {{ chart_labels | tojson }};
-  const chartPrices = {{ chart_prices | tojson }};
-  const historyLabels = {{ history_labels | tojson }};
-  const historyPrices = {{ history_prices | tojson }};
-  const priceDatasetLabel = {{ t.price_dataset_label | tojson }};
-  const cheapestDatasetLabel = {{ t.cheapest_dataset_label | tojson }};
+  const T = {{ t | tojson }};
+  const HISTORY_ENABLED = {{ history_enabled | tojson }};
+
+  function fmt(str, params) {
+    return str.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? params[k] : ''));
+  }
+
+  function formatDuration(seconds) {
+    if (seconds >= 86400) return fmt(T.duration_days, { n: Math.floor(seconds / 86400) });
+    if (seconds >= 3600) return fmt(T.duration_hours, { n: Math.floor(seconds / 3600) });
+    if (seconds >= 60) return fmt(T.duration_minutes, { n: Math.floor(seconds / 60) });
+    return T.duration_moment;
+  }
+
+  function renderFactText(f) {
+    switch (f.type) {
+      case 'never_changed':
+        return fmt(T.fact_never_changed, { match: f.match, duration: formatDuration(f.duration_seconds) });
+      case 'longest_expensive':
+        return fmt(T.fact_longest_expensive, { match: f.match, duration: formatDuration(f.duration_seconds), price: f.price.toFixed(2) });
+      case 'longest_cheapest':
+        return fmt(T.fact_longest_cheapest, { match: f.match, duration: formatDuration(f.duration_seconds), price: f.price.toFixed(2) });
+      case 'mover_up':
+        return fmt(T.fact_mover_up, { match: f.match, percent: f.percent.toFixed(1) });
+      case 'mover_down':
+        return fmt(T.fact_mover_down, { match: f.match, percent: Math.abs(f.percent).toFixed(1) });
+      default:
+        return '';
+    }
+  }
 
   function applyPreset(discountValue) {
     document.getElementById('discount').value = discountValue;
@@ -582,6 +598,13 @@
     }
   }
 
+  // Diese Variablen werden erst gefüllt, sobald /api/page-data geantwortet hat.
+  let chartLabels = [];
+  let chartPrices = [];
+  let historyLabels = [];
+  let historyPrices = [];
+  let pageData = null;
+
   let top15Initialized = false;
   function initTop15Chart() {
     const ctx = document.getElementById('priceChart').getContext('2d');
@@ -590,7 +613,7 @@
       data: {
         labels: chartLabels,
         datasets: [{
-          label: priceDatasetLabel,
+          label: T.price_dataset_label,
           data: chartPrices,
           backgroundColor: chartPrices.map((_, i) => i < 3 ? 'rgba(110, 231, 168, 0.85)' : 'rgba(242, 184, 75, 0.55)'),
           borderRadius: 3,
@@ -624,12 +647,14 @@
     const historyCanvas = document.getElementById('historyChart');
     if (!historyCanvas || historyLabels.length < 2) return;
 
+    historyCanvas.classList.remove('hidden');
+
     new Chart(historyCanvas.getContext('2d'), {
       type: 'line',
       data: {
         labels: historyLabels,
         datasets: [{
-          label: cheapestDatasetLabel,
+          label: T.cheapest_dataset_label,
           data: historyPrices,
           borderColor: 'rgba(110, 231, 168, 0.9)',
           backgroundColor: 'rgba(110, 231, 168, 0.12)',
@@ -661,12 +686,12 @@
     });
   }
 
-  // ---- Verlauf pro Match (per Dropdown ausgewählt) ----
   const matchSelect = document.getElementById('matchSelect');
   let matchHistoryChart = null;
   let matchHistoryInitialized = false;
 
   function loadMatchHistory(matchIndex) {
+    if (matchIndex === undefined || matchIndex === null || matchIndex === '') return;
     fetch(`/api/history/${matchIndex}`)
       .then((res) => res.json())
       .then((data) => {
@@ -690,7 +715,7 @@
           data: {
             labels: data.labels,
             datasets: [{
-              label: priceDatasetLabel,
+              label: T.price_dataset_label,
               data: data.prices,
               borderColor: 'rgba(242, 184, 75, 0.9)',
               backgroundColor: 'rgba(242, 184, 75, 0.12)',
@@ -728,11 +753,16 @@
   }
 
   // Panels starten eingeklappt. Charts werden erst beim ersten Aufklappen
-  // erzeugt (lazy), damit Chart.js keine Größe 0 misst.
+  // erzeugt (lazy) — und nur, wenn die Daten schon geladen sind.
   function togglePanel(panelId) {
     const panel = document.getElementById(panelId);
     panel.classList.toggle('collapsed');
     if (panel.classList.contains('collapsed')) return;
+    initChartsForPanel(panelId);
+  }
+
+  function initChartsForPanel(panelId) {
+    if (!pageData) return; // Daten noch nicht da — wird nachgeholt, sobald sie ankommen
 
     if (panelId === 'panel-top15' && !top15Initialized) {
       initTop15Chart();
@@ -747,11 +777,132 @@
       matchHistoryInitialized = true;
     }
 
+    const panel = document.getElementById(panelId);
     panel.querySelectorAll('canvas').forEach((canvas) => {
       const chart = Chart.getChart(canvas);
       if (chart) requestAnimationFrame(() => chart.resize());
     });
   }
+
+  function initChartsForOpenPanels() {
+    ['panel-top15', 'panel-history', 'panel-match-history'].forEach((id) => {
+      const panel = document.getElementById(id);
+      if (panel && !panel.classList.contains('collapsed')) {
+        initChartsForPanel(id);
+      }
+    });
+  }
+
+  // ---- Rendering der nachgeladenen Daten ----
+
+  function renderTable(results) {
+    const html = results.map((m, i) => `
+      <div class="row ${i < 3 ? 'top' : ''}">
+        <span class="rank">${String(i + 1).padStart(2, '0')}</span>
+        <span class="team">${m.team1} <span class="vs">vs</span> ${m.team2}</span>
+        <span class="sparkline-cell">${m.sparkline_svg ? m.sparkline_svg : '<span class="no-data">–</span>'}</span>
+        <span class="tokens">${Math.round(m.tokens)}</span>
+        <span class="price">${m.price_eur.toFixed(2)} ¥</span>
+      </div>
+    `).join('');
+    document.getElementById('tableBody').innerHTML = html;
+  }
+
+  function renderMissing(missing) {
+    const box = document.getElementById('missingBox');
+    if (!missing || missing.length === 0) {
+      box.classList.add('hidden');
+      return;
+    }
+    box.classList.remove('hidden');
+    box.querySelector('.missing-list').textContent = missing.join(', ');
+  }
+
+  function renderMatchOptions(options) {
+    if (!matchSelect) return;
+    matchSelect.innerHTML = options.map((o) => `<option value="${o.index}">${o.label}</option>`).join('');
+  }
+
+  function renderFacts(facts) {
+    const section = document.getElementById('factsSection');
+    if (!section) return;
+    if (!facts || facts.length === 0) {
+      section.classList.add('hidden');
+      return;
+    }
+    section.innerHTML = facts.map((f) => `<div class="fact-card">${renderFactText(f)}</div>`).join('');
+  }
+
+  function renderHistoryStats(stats) {
+    const grid = document.getElementById('historyStatsGrid');
+    if (!stats) return;
+    grid.classList.remove('hidden');
+    document.getElementById('historyNotEnough').classList.add('hidden');
+
+    document.getElementById('statCurrent').textContent = stats.current.toFixed(2) + ' ¥';
+
+    const setChange = (elId, abs, pct) => {
+      const el = document.getElementById(elId);
+      if (abs === null || abs === undefined) { el.textContent = '–'; el.className = 'value'; return; }
+      const sign = abs > 0 ? '+' : '';
+      el.textContent = `${sign}${abs.toFixed(2)} ¥` + (pct !== null && pct !== undefined ? ` (${sign}${pct.toFixed(1)}%)` : '');
+      el.className = 'value ' + (abs > 0 ? 'pos' : abs < 0 ? 'neg' : '');
+    };
+    setChange('statChange', stats.change_abs, stats.change_pct);
+    setChange('statChange24h', stats.change_24h_abs, stats.change_24h_pct);
+
+    document.getElementById('statMin').textContent = stats.min.toFixed(2) + ' ¥';
+    document.getElementById('statMax').textContent = stats.max.toFixed(2) + ' ¥';
+    document.getElementById('statAvg').textContent = stats.avg.toFixed(2) + ' ¥';
+    document.getElementById('statPoints').textContent = stats.count;
+  }
+
+  function showError(message) {
+    const banner = document.getElementById('errorBanner');
+    banner.textContent = T.error_banner + (message ? ' ' + message : '');
+    banner.classList.remove('hidden');
+  }
+
+  function loadPageData() {
+    fetch('/api/page-data')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          showError(data.error);
+          return;
+        }
+
+        pageData = data;
+
+        document.getElementById('teamsLoaded').classList.remove('skeleton');
+        document.getElementById('teamsLoaded').textContent = fmt(T.teams_loaded, { count: data.team_count });
+        document.getElementById('matchesCalculated').classList.remove('skeleton');
+        document.getElementById('matchesCalculated').textContent = fmt(T.matches_calculated, { count: data.results.length });
+        document.getElementById('generatedAt').classList.remove('skeleton');
+        document.getElementById('generatedAt').textContent = fmt(T.generated_at, { time: data.generated_at });
+
+        document.getElementById('top15Title').textContent = fmt(T.panel_top15_title, { n: data.chart_labels.length });
+
+        renderTable(data.results);
+        renderMissing(data.missing);
+        renderMatchOptions(data.match_options);
+
+        if (HISTORY_ENABLED) {
+          renderFacts(data.facts);
+          if (data.history_stats) renderHistoryStats(data.history_stats);
+        }
+
+        chartLabels = data.chart_labels;
+        chartPrices = data.chart_prices;
+        historyLabels = data.history_labels;
+        historyPrices = data.history_prices;
+
+        initChartsForOpenPanels();
+      })
+      .catch((err) => showError(String(err)));
+  }
+
+  loadPageData();
 
   // Lädt die Seite automatisch alle 30 Minuten neu, solange der Tab offen ist.
   // Für zuverlässige Datensammlung im Hintergrund (auch bei geschlossenem Tab)
