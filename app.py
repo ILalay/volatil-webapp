@@ -634,7 +634,7 @@ def _quantile(sorted_vals, q):
     return sorted_vals[lo] * (1 - frac) + sorted_vals[hi] * frac
 
 
-def compute_price_prediction(history, future_points=6, horizon_hours=24):
+def compute_price_prediction(history, future_points=None, horizon_hours=24):
     """Prognose der günstigsten Kombination: gedämpftes Holt-Verfahren
     (Level + Trend) plus optionales additives Tageszeitprofil (3h-Blöcke).
 
@@ -645,7 +645,12 @@ def compute_price_prediction(history, future_points=6, horizon_hours=24):
     Zusätzlich werden zwei Szenarien aus den empirischen Residuen-Quantilen
     abgeleitet: optimistisch (20 %-Quantil, aus Käufersicht = günstiger) und
     konservativ (80 %-Quantil). Die Spreizung wächst mit dem Horizont.
-    Keine verlässliche Vorhersage — nur eine statistische Fortschreibung."""
+    Keine verlässliche Vorhersage — nur eine statistische Fortschreibung.
+
+    future_points=None: Die Anzahl der Prognosepunkte wird automatisch so
+    gewählt, dass das Prognoseraster ungefähr dem History-Intervall entspricht
+    (min. 6, max. 48 Punkte). Auf der Kategorien-Achse des Charts nimmt die
+    Prognose dadurch sichtbar Breite ein, statt am Rand zusammenzuschrumpfen."""
     if len(history) < 5:
         return None
 
@@ -654,6 +659,11 @@ def compute_price_prediction(history, future_points=6, horizon_hours=24):
         prices = [float(h["cheapest_price"]) for h in history]
     except (KeyError, TypeError, ValueError):
         return None
+
+    span_h = (timestamps[-1] - timestamps[0]).total_seconds() / 3600.0
+    avg_interval_h = max(span_h / (len(prices) - 1), 1e-6)
+    if future_points is None:
+        future_points = max(6, min(48, round(horizon_hours / avg_interval_h)))
 
     # --- Variante A: reines Level+Trend auf den Rohpreisen -----------------
     model_plain = _holt_damped_best(prices)
@@ -701,8 +711,6 @@ def compute_price_prediction(history, future_points=6, horizon_hours=24):
     q_high = _quantile(sorted_res, 0.8)  # typischerweise positiv
     # Anzahl einschrittiger Intervalle, die ein Prognoseschritt abdeckt —
     # die Unsicherheit wächst näherungsweise mit der Wurzel des Horizonts.
-    span_h = (timestamps[-1] - timestamps[0]).total_seconds() / 3600.0
-    avg_interval_h = max(span_h / (len(prices) - 1), 1e-6)
     steps_per_point = step / avg_interval_h
 
     optimistic = []
