@@ -86,6 +86,10 @@
     margin-top: 0.8rem;
   }
 
+  .subline span {
+    white-space: nowrap;
+  }
+
   .toolbar {
     display: flex;
     flex-direction: column;
@@ -488,6 +492,9 @@
         <div class="stat-box"><div class="label">{{ t.stat_points }}</div><div class="value" id="statPoints">–</div></div>
       </div>
       <canvas id="historyChart" height="90" class="hidden"></canvas>
+      <p id="predictionDisclaimer" class="hidden" style="color: var(--muted); font-size: 0.72rem; margin: 0.7rem 0 0;">
+        {{ t.prediction_disclaimer }}
+      </p>
       <p id="historyNotEnough" style="color: var(--muted); font-size: 0.82rem; margin: 0;">
         {{ t.history_not_enough }}
       </p>
@@ -603,6 +610,7 @@
   let chartPrices = [];
   let historyLabels = [];
   let historyPrices = [];
+  let historyPrediction = null;
   let pageData = null;
 
   let top15Initialized = false;
@@ -649,28 +657,56 @@
 
     historyCanvas.classList.remove('hidden');
 
+    const labels = historyLabels.slice();
+    const actualData = historyPrices.slice();
+    const datasets = [{
+      label: T.cheapest_dataset_label,
+      data: actualData,
+      borderColor: 'rgba(110, 231, 168, 0.9)',
+      backgroundColor: 'rgba(110, 231, 168, 0.12)',
+      pointRadius: 2,
+      pointBackgroundColor: 'rgba(110, 231, 168, 0.9)',
+      borderWidth: 2,
+      tension: 0.25,
+      fill: true
+    }];
+
+    const hasPrediction = historyPrediction && historyPrediction.labels && historyPrediction.labels.length > 0;
+    if (hasPrediction) {
+      labels.push(...historyPrediction.labels);
+      for (let i = 0; i < historyPrediction.labels.length; i++) actualData.push(null);
+
+      const predictionData = new Array(historyLabels.length - 1).fill(null);
+      predictionData.push(historyPrices[historyPrices.length - 1]); // Anschluss an letzten echten Punkt
+      predictionData.push(...historyPrediction.prices);
+
+      datasets.push({
+        label: T.prediction_dataset_label,
+        data: predictionData,
+        borderColor: 'rgba(242, 184, 75, 0.85)',
+        borderDash: [5, 4],
+        pointRadius: 2,
+        pointBackgroundColor: 'rgba(242, 184, 75, 0.85)',
+        borderWidth: 2,
+        tension: 0,
+        fill: false
+      });
+
+      document.getElementById('predictionDisclaimer').classList.remove('hidden');
+    }
+
     new Chart(historyCanvas.getContext('2d'), {
       type: 'line',
-      data: {
-        labels: historyLabels,
-        datasets: [{
-          label: T.cheapest_dataset_label,
-          data: historyPrices,
-          borderColor: 'rgba(110, 231, 168, 0.9)',
-          backgroundColor: 'rgba(110, 231, 168, 0.12)',
-          pointRadius: 2,
-          pointBackgroundColor: 'rgba(110, 231, 168, 0.9)',
-          borderWidth: 2,
-          tension: 0.25,
-          fill: true
-        }]
-      },
+      data: { labels, datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: (item) => `${item.raw.toFixed(2)} ¥` } }
+          legend: {
+            display: hasPrediction,
+            labels: { color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12 }
+          },
+          tooltip: { callbacks: { label: (item) => `${item.dataset.label}: ${item.raw.toFixed(2)} ¥` } }
         },
         scales: {
           x: {
@@ -875,10 +911,13 @@
         pageData = data;
 
         document.getElementById('teamsLoaded').classList.remove('skeleton');
+        document.getElementById('teamsLoaded').style.width = 'auto';
         document.getElementById('teamsLoaded').textContent = fmt(T.teams_loaded, { count: data.team_count });
         document.getElementById('matchesCalculated').classList.remove('skeleton');
+        document.getElementById('matchesCalculated').style.width = 'auto';
         document.getElementById('matchesCalculated').textContent = fmt(T.matches_calculated, { count: data.results.length });
         document.getElementById('generatedAt').classList.remove('skeleton');
+        document.getElementById('generatedAt').style.width = 'auto';
         document.getElementById('generatedAt').textContent = fmt(T.generated_at, { time: data.generated_at });
 
         document.getElementById('top15Title').textContent = fmt(T.panel_top15_title, { n: data.chart_labels.length });
@@ -896,6 +935,7 @@
         chartPrices = data.chart_prices;
         historyLabels = data.history_labels;
         historyPrices = data.history_prices;
+        historyPrediction = data.history_prediction;
 
         initChartsForOpenPanels();
       })
