@@ -119,8 +119,7 @@ TRANSLATIONS = {
         "duration_minutes": "{n} Minuten",
         "duration_moment": "gerade eben",
         "prediction_dataset_label": "Prognose (Modell)",
-        "prediction_optimistic_label": "Optimistisch (günstig)",
-        "prediction_conservative_label": "Konservativ",
+        "prediction_range_label": "Typische Schwankungsbreite",
         "prediction_disclaimer": "Prognosen sind unsicher und können vom tatsächlichen Verlauf abweichen.",
         "prediction_deviation": "Prognose (24h): {percent} gegenüber dem aktuellen Preis.",
     },
@@ -168,8 +167,7 @@ TRANSLATIONS = {
         "duration_minutes": "{n} minutes",
         "duration_moment": "just now",
         "prediction_dataset_label": "Forecast (model)",
-        "prediction_optimistic_label": "Optimistic (cheaper)",
-        "prediction_conservative_label": "Conservative",
+        "prediction_range_label": "Typical range",
         "prediction_disclaimer": "Forecasts are uncertain and may deviate from actual prices.",
         "prediction_deviation": "Forecast (24h): {percent} vs. the current price.",
     },
@@ -217,8 +215,7 @@ TRANSLATIONS = {
         "duration_minutes": "{n} 分钟",
         "duration_moment": "刚刚",
         "prediction_dataset_label": "预测（模型）",
-        "prediction_optimistic_label": "乐观（更便宜）",
-        "prediction_conservative_label": "保守",
+        "prediction_range_label": "典型波动区间",
         "prediction_disclaimer": "预测存在不确定性，可能与实际价格不符。",
         "prediction_deviation": "预测（24小时）：与当前价格相比 {percent}。",
     },
@@ -705,20 +702,39 @@ def compute_price_prediction(history, future_points=None, horizon_hours=24):
         future_labels.append(future_ts.strftime("%Y-%m-%dT%H:%M:%S"))
         central.append(max(base, 0.0))
 
-    # --- Szenarien aus Residuen-Quantilen ----------------------------------
-    sorted_res = sorted(model["residuals"])
-    q_low = _quantile(sorted_res, 0.2)   # typischerweise negativ
-    q_high = _quantile(sorted_res, 0.8)  # typischerweise positiv
-    # Anzahl einschrittiger Intervalle, die ein Prognoseschritt abdeckt —
-    # die Unsicherheit wächst näherungsweise mit der Wurzel des Horizonts.
+    # --- Szenarien aus horizontbasierten Preisänderungen -------------------
+    # Einschrittige Residuen sind bei Plateau-Preisen fast immer 0 und
+    # unterschätzen die Sprung-Volatilität massiv. Stattdessen: Für jeden
+    # Prognosepunkt die empirischen Quantile der historisch beobachteten
+    # Preisänderungen über genau diesen Zeithorizont ("Wie stark hat sich
+    # der Preis typischerweise in X Stunden bewegt?").
     steps_per_point = step / avg_interval_h
+    n = len(prices)
+
+    def horizon_quantiles(k):
+        """(q20, q80) der Preisänderungen über k History-Schritte."""
+        k = max(1, min(k, n - 2))
+        diffs = sorted(prices[j + k] - prices[j] for j in range(n - k))
+        if len(diffs) < 5:
+            return None
+        return _quantile(diffs, 0.2), _quantile(diffs, 0.8)
 
     optimistic = []
     conservative = []
+    last_q = (0.0, 0.0)
+    last_k = 1
     for i, base in enumerate(central, start=1):
-        scale = (i * steps_per_point) ** 0.5
-        optimistic.append(max(base + q_low * scale, 0.0))
-        conservative.append(max(base + q_high * scale, 0.0))
+        k = round(i * steps_per_point)
+        q = horizon_quantiles(k)
+        if q is None:
+            # Zu wenig Paare für diesen Horizont: letzte bekannte Spanne
+            # mit Wurzel des Horizontverhältnisses fortschreiben.
+            scale = (max(k, 1) / max(last_k, 1)) ** 0.5
+            q = (last_q[0] * scale, last_q[1] * scale)
+        else:
+            last_q, last_k = q, max(k, 1)
+        optimistic.append(max(base + q[0], 0.0))
+        conservative.append(max(base + q[1], 0.0))
 
     return {
         "labels": future_labels,
