@@ -568,11 +568,38 @@
     return str.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? params[k] : ''));
   }
 
-  // "2026-07-23T14:05:00" -> "23.07. 14:05"
-  function formatTs(ts) {
+  // "2026-07-23T14:05:00" -> Achse: ["14:05", "23.07."] / Tooltip: "23.07.2026 · 14:05"
+  function tsAxisLabel(ts) {
     if (typeof ts !== 'string' || ts.length < 16) return ts;
-    return `${ts.slice(8, 10)}.${ts.slice(5, 7)}. ${ts.slice(11, 16)}`;
+    return [ts.slice(11, 16), `${ts.slice(8, 10)}.${ts.slice(5, 7)}.`];
   }
+  function tsTooltipLabel(ts) {
+    if (typeof ts !== 'string' || ts.length < 16) return ts;
+    return `${ts.slice(8, 10)}.${ts.slice(5, 7)}.${ts.slice(0, 4)} · ${ts.slice(11, 16)}`;
+  }
+
+  // Zeichnet im History-Chart eine gestrichelte Trennlinie am "Jetzt"-Punkt
+  // und hinterlegt den Prognosebereich dezent.
+  const forecastShadePlugin = {
+    id: 'forecastShade',
+    beforeDatasetsDraw(chart, _args, opts) {
+      if (!opts || opts.startIndex == null) return;
+      const { ctx, chartArea, scales } = chart;
+      const x = scales.x.getPixelForValue(opts.startIndex);
+      if (!isFinite(x)) return;
+      ctx.save();
+      ctx.fillStyle = 'rgba(242, 184, 75, 0.05)';
+      ctx.fillRect(x, chartArea.top, chartArea.right - x, chartArea.bottom - chartArea.top);
+      ctx.strokeStyle = 'rgba(242, 184, 75, 0.45)';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, chartArea.top);
+      ctx.lineTo(x, chartArea.bottom);
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
 
   function formatDuration(seconds) {
     if (seconds >= 86400) return fmt(T.duration_days, { n: Math.floor(seconds / 86400) });
@@ -669,11 +696,12 @@
       label: T.cheapest_dataset_label,
       data: actualData,
       borderColor: 'rgba(110, 231, 168, 0.9)',
-      backgroundColor: 'rgba(110, 231, 168, 0.12)',
-      pointRadius: 2,
+      backgroundColor: 'rgba(110, 231, 168, 0.06)',
+      pointRadius: 0,
+      pointHoverRadius: 4,
       pointBackgroundColor: 'rgba(110, 231, 168, 0.9)',
       borderWidth: 2,
-      tension: 0.25,
+      stepped: true,
       fill: true
     }];
 
@@ -691,10 +719,9 @@
         data: predictionData,
         borderColor: 'rgba(242, 184, 75, 1)',
         borderDash: [6, 4],
-        pointStyle: 'triangle',
-        pointRadius: 5,
+        pointRadius: 0,
+        pointHoverRadius: 4,
         pointBackgroundColor: 'rgba(242, 184, 75, 1)',
-        pointBorderColor: 'rgba(242, 184, 75, 1)',
         borderWidth: 2.5,
         tension: 0,
         fill: false
@@ -711,12 +738,11 @@
           label,
           data,
           borderColor: color,
-          borderDash: [4, 4],
-          pointStyle: 'rectRot',
-          pointRadius: 4,
+          borderDash: [3, 3],
+          pointRadius: 0,
+          pointHoverRadius: 4,
           pointBackgroundColor: color,
-          pointBorderColor: color,
-          borderWidth: 2,
+          borderWidth: 1.8,
           tension: 0,
           fill: false,
           hidden: true
@@ -741,17 +767,20 @@
     new Chart(historyCanvas.getContext('2d'), {
       type: 'line',
       data: { labels, datasets },
+      plugins: [forecastShadePlugin],
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
         plugins: {
+          forecastShade: hasPrediction ? { startIndex: historyLabels.length - 1 } : {},
           legend: {
             display: hasPrediction,
-            labels: { color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12, usePointStyle: true }
+            labels: { color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12 }
           },
           tooltip: {
             callbacks: {
-              title: (items) => formatTs(items[0].label),
+              title: (items) => tsTooltipLabel(items[0].label),
               label: (item) => `${item.dataset.label}: ${item.raw.toFixed(2)} ¥`
             }
           }
@@ -759,8 +788,8 @@
         scales: {
           x: {
             ticks: {
-              color: '#7a8085', font: { family: 'JetBrains Mono' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8,
-              callback: function (value) { return formatTs(this.getLabelForValue(value)); }
+              color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 7,
+              callback: function (value) { return tsAxisLabel(this.getLabelForValue(value)); }
             },
             grid: { color: '#262b32' }
           },
@@ -805,22 +834,24 @@
               label: T.price_dataset_label,
               data: data.prices,
               borderColor: 'rgba(242, 184, 75, 0.9)',
-              backgroundColor: 'rgba(242, 184, 75, 0.12)',
-              pointRadius: 2,
+              backgroundColor: 'rgba(242, 184, 75, 0.06)',
+              pointRadius: 0,
+              pointHoverRadius: 4,
               pointBackgroundColor: 'rgba(242, 184, 75, 0.9)',
               borderWidth: 2,
-              tension: 0.25,
+              stepped: true,
               fill: true
             }]
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
             plugins: {
               legend: { display: false },
               tooltip: {
                 callbacks: {
-                  title: (items) => formatTs(items[0].label),
+                  title: (items) => tsTooltipLabel(items[0].label),
                   label: (item) => `${item.raw.toFixed(2)} ¥`
                 }
               }
@@ -828,8 +859,8 @@
             scales: {
               x: {
                 ticks: {
-                  color: '#7a8085', font: { family: 'JetBrains Mono' }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8,
-                  callback: function (value) { return formatTs(this.getLabelForValue(value)); }
+                  color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 7,
+                  callback: function (value) { return tsAxisLabel(this.getLabelForValue(value)); }
                 },
                 grid: { color: '#262b32' }
               },
