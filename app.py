@@ -121,7 +121,8 @@ TRANSLATIONS = {
         "prediction_dataset_label": "Prognose (Modell)",
         "prediction_optimistic_label": "Optimistisch (günstig)",
         "prediction_conservative_label": "Konservativ",
-        "prediction_disclaimer": "Statistische Fortschreibung (Trend + Tageszeitprofil) mit optimistischem und konservativem Szenario aus historischen Abweichungen — keine verlässliche Vorhersage der tatsächlichen Preisentwicklung.",
+        "prediction_disclaimer": "Prognosen sind unsicher und können vom tatsächlichen Verlauf abweichen.",
+        "prediction_deviation": "Prognose (24h): {percent} gegenüber dem aktuellen Preis.",
     },
     "en": {
         "eyebrow": "Volatile Shop · Gold Team Stickers",
@@ -169,7 +170,8 @@ TRANSLATIONS = {
         "prediction_dataset_label": "Forecast (model)",
         "prediction_optimistic_label": "Optimistic (cheaper)",
         "prediction_conservative_label": "Conservative",
-        "prediction_disclaimer": "Statistical extrapolation (trend + time-of-day profile) with optimistic and conservative scenarios derived from historical deviations — not a reliable prediction of actual future prices.",
+        "prediction_disclaimer": "Forecasts are uncertain and may deviate from actual prices.",
+        "prediction_deviation": "Forecast (24h): {percent} vs. the current price.",
     },
     "zh": {
         "eyebrow": "Volatile Shop · 金色战队贴纸",
@@ -217,7 +219,8 @@ TRANSLATIONS = {
         "prediction_dataset_label": "预测（模型）",
         "prediction_optimistic_label": "乐观（更便宜）",
         "prediction_conservative_label": "保守",
-        "prediction_disclaimer": "基于趋势和时段特征的统计推算，并根据历史偏差给出乐观与保守两种情景——并非对未来价格的可靠预测。",
+        "prediction_disclaimer": "预测存在不确定性，可能与实际价格不符。",
+        "prediction_deviation": "预测（24小时）：与当前价格相比 {percent}。",
     },
 }
 
