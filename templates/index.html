@@ -593,6 +593,14 @@
     return str.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? params[k] : ''));
   }
 
+  // Schutz gegen XSS: externe Strings (Teamnamen von der Volatile-API)
+  // niemals ungefiltert per innerHTML einfügen.
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
   // "2026-07-23T14:05:00" -> Achse: "14:05" / Tooltip: "23.07.2026 · 14:05"
   function tsAxisLabel(ts) {
     if (typeof ts !== 'string' || ts.length < 16) return ts;
@@ -636,15 +644,15 @@
   function renderFactText(f) {
     switch (f.type) {
       case 'never_changed':
-        return fmt(T.fact_never_changed, { match: f.match, duration: formatDuration(f.duration_seconds) });
+        return fmt(T.fact_never_changed, { match: esc(f.match), duration: formatDuration(f.duration_seconds) });
       case 'longest_expensive':
-        return fmt(T.fact_longest_expensive, { match: f.match, duration: formatDuration(f.duration_seconds), price: f.price.toFixed(2) });
+        return fmt(T.fact_longest_expensive, { match: esc(f.match), duration: formatDuration(f.duration_seconds), price: f.price.toFixed(2) });
       case 'longest_cheapest':
-        return fmt(T.fact_longest_cheapest, { match: f.match, duration: formatDuration(f.duration_seconds), price: f.price.toFixed(2) });
+        return fmt(T.fact_longest_cheapest, { match: esc(f.match), duration: formatDuration(f.duration_seconds), price: f.price.toFixed(2) });
       case 'mover_up':
-        return fmt(T.fact_mover_up, { match: f.match, percent: f.percent.toFixed(1) });
+        return fmt(T.fact_mover_up, { match: esc(f.match), percent: f.percent.toFixed(1) });
       case 'mover_down':
-        return fmt(T.fact_mover_down, { match: f.match, percent: Math.abs(f.percent).toFixed(1) });
+        return fmt(T.fact_mover_down, { match: esc(f.match), percent: Math.abs(f.percent).toFixed(1) });
       default:
         return '';
     }
@@ -975,7 +983,7 @@
     const html = results.map((m, i) => `
       <div class="row ${i < 3 ? 'top' : ''}">
         <span class="rank">${String(i + 1).padStart(2, '0')}</span>
-        <span class="team">${m.team1} <span class="vs">vs</span> ${m.team2}</span>
+        <span class="team">${esc(m.team1)} <span class="vs">vs</span> ${esc(m.team2)}</span>
         <span class="sparkline-cell">${m.sparkline_svg ? m.sparkline_svg : '<span class="no-data">–</span>'}</span>
         <span class="delta">${renderDelta(m.change_24h_pct)}</span>
         <span class="tokens">${Math.round(m.tokens)}</span>
@@ -997,7 +1005,7 @@
 
   function renderMatchOptions(options) {
     if (!matchSelect) return;
-    matchSelect.innerHTML = options.map((o) => `<option value="${o.index}">${o.label}</option>`).join('');
+    matchSelect.innerHTML = options.map((o) => `<option value="${Number(o.index)}">${esc(o.label)}</option>`).join('');
   }
 
   function renderFacts(facts) {
