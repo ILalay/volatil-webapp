@@ -6,6 +6,11 @@ from datetime import datetime, timedelta
 import requests
 from flask import Flask, make_response, render_template, request
 
+try:
+    import psycopg  # optional: nur nötig, wenn DATABASE_URL gesetzt ist
+except ImportError:  # pragma: no cover
+    psycopg = None
+
 app = Flask(__name__)
 
 # ============================================================
@@ -22,7 +27,16 @@ TOKENS_PER_100 = 153     # 100 Tokens = 153 ¥
 
 CACHE_SECONDS = 300  # Wie lange die Tokenpreise zwischengespeichert werden
 
-# History wird über GitHub Gists gespeichert (kostenlos, dauerhaft).
+# History-Speicher: bevorzugt Postgres (DATABASE_URL, z. B. Neon),
+# sonst Fallback auf GitHub Gist. Ohne beides läuft die Seite ohne History.
+DATABASE_URL = os.environ.get("DATABASE_URL")
+HISTORY_LOAD_LIMIT = 2000  # maximal geladene Snapshots pro Request
+
+# Optionaler Schutz für /refresh: Ist REFRESH_KEY gesetzt, muss der
+# Cron-Dienst ?key=<REFRESH_KEY> mitschicken.
+REFRESH_KEY = os.environ.get("REFRESH_KEY")
+
+# Gist-Fallback (Altbestand)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 GIST_ID = os.environ.get("GIST_ID")
 HISTORY_FILENAME = "price_history.json"
@@ -302,15 +316,128 @@ def load_matches():
 
 
 # ============================================================
-# Preisverlauf (History) via GitHub Gist
+# Preisverlauf (History) via Postgres (Neon) mit Gist-Fallback
 # ============================================================
 
-def history_enabled():
+def db_enabled():
+    return bool(DATABASE_URL and psycopg is not None)
+
+
+def gist_enabled():
     return bool(GITHUB_TOKEN and GIST_ID)
 
 
+def history_enabled():
+    return db_enabled() or gist_enabled()
+
+
+_db_initialized = False
+
+
+def _db_connect():
+    return psycopg.connect(DATABASE_URL, connect_timeout=10)
+
+
+def init_db():
+    """Legt das Schema an (idempotent). Wird beim ersten Zugriff aufgerufen."""
+    global _db_initialized
+    if _db_initialized:
+        return
+    with _db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS snapshots (
+                    id BIGSERIAL PRIMARY KEY,
+                    ts TIMESTAMP NOT NULL UNIQUE,
+                    cheapest_price DOUBLE PRECISION NOT NULL,
+                    cheapest_match TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS match_prices (
+                    snapshot_id BIGINT NOT NULL
+                        REFERENCES snapshots (id) ON DELETE CASCADE,
+                    match_index INTEGER NOT NULL,
+                    price DOUBLE PRECISION NOT NULL,
+                    PRIMARY KEY (snapshot_id, match_index)
+                );
+                CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots (ts);
+                """
+            )
+    _db_initialized = True
+
+
+def load_history_from_db(limit=HISTORY_LOAD_LIMIT):
+    """Lädt die letzten Snapshots und liefert exakt die Struktur des
+    bisherigen Gist-Formats, damit der restliche Code unverändert bleibt."""
+    init_db()
+    with _db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, ts, cheapest_price, cheapest_match
+                FROM snapshots ORDER BY ts DESC LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = list(reversed(cur.fetchall()))
+            if not rows:
+                return []
+            ids = [r[0] for r in rows]
+            cur.execute(
+                """
+                SELECT snapshot_id, match_index, price
+                FROM match_prices WHERE snapshot_id = ANY(%s)
+                """,
+                (ids,),
+            )
+            prices_by_snap = {}
+            for snap_id, idx, price in cur.fetchall():
+                prices_by_snap.setdefault(snap_id, {})[str(idx)] = price
+
+    history = []
+    for snap_id, ts, cheapest_price, cheapest_match in rows:
+        history.append(
+            {
+                "timestamp": ts.strftime("%Y-%m-%dT%H:%M:%S"),
+                "cheapest_price": cheapest_price,
+                "cheapest_match": cheapest_match,
+                "prices": prices_by_snap.get(snap_id, {}),
+            }
+        )
+    return history
+
+
+def save_snapshot_to_db(timestamp_str, cheapest_price, cheapest_match, prices):
+    """Schreibt einen Snapshot. ON CONFLICT verhindert Duplikate, falls
+    mehrere Worker gleichzeitig refreshen (Race-Condition-Schutz)."""
+    init_db()
+    with _db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO snapshots (ts, cheapest_price, cheapest_match)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (ts) DO NOTHING
+                RETURNING id
+                """,
+                (timestamp_str, cheapest_price, cheapest_match),
+            )
+            row = cur.fetchone()
+            if row is None:  # Duplikat: anderer Worker war schneller
+                return
+            snap_id = row[0]
+            cur.executemany(
+                """
+                INSERT INTO match_prices (snapshot_id, match_index, price)
+                VALUES (%s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                [(snap_id, int(idx), price) for idx, price in prices.items()],
+            )
+
+
 def load_history_from_gist():
-    if not history_enabled():
+    if not gist_enabled():
         return []
 
     response = requests.get(
@@ -344,7 +471,7 @@ def load_history_from_gist():
 
 
 def save_history_to_gist(history):
-    if not history_enabled():
+    if not gist_enabled():
         return
 
     trimmed = history[-MAX_HISTORY_POINTS:]
@@ -362,19 +489,30 @@ def save_history_to_gist(history):
 
 
 def append_history_point(team_tokens):
-    """Berechnet die Preise aller Matches (fixer Referenz-Rabatt) und hängt
-    einen vollständigen Snapshot an die Gist-History an."""
+    """Berechnet die Preise aller Matches (fixer Referenz-Rabatt) und
+    persistiert einen vollständigen Snapshot — bevorzugt in Postgres,
+    sonst im Gist-Fallback."""
     if not history_enabled():
         return []
 
     results, _ = compute_results(team_tokens, HISTORY_DISCOUNT)
-    history = load_history_from_gist()
 
+    if db_enabled():
+        if results:
+            cheapest = results[0]
+            save_snapshot_to_db(
+                time.strftime("%Y-%m-%dT%H:%M:%S"),
+                round(cheapest["price_eur"], 2),
+                f"{cheapest['team1']} vs {cheapest['team2']}",
+                {str(r["match_index"]): round(r["price_eur"], 2) for r in results},
+            )
+        return load_history_from_db()
+
+    history = load_history_from_gist()
     if not results:
         return history
 
     cheapest = results[0]
-
     history.append(
         {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -399,8 +537,8 @@ def get_team_tokens(force=False):
             _cache["timestamp"] = now
             try:
                 _cache["history"] = append_history_point(_cache["team_tokens"])
-            except requests.exceptions.RequestException:
-                pass
+            except Exception:  # noqa: BLE001 - History-Ausfall darf die Seite nicht killen
+                app.logger.exception("History-Update fehlgeschlagen")
         except (requests.exceptions.RequestException, KeyError, ValueError) as exc:
             _cache["error"] = str(exc)
             if _cache["team_tokens"] is None:
@@ -956,7 +1094,7 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "missing": missing,
         "team_count": len(team_tokens),
         "generated_at": time.strftime("%d.%m.%Y %H:%M:%S"),
-        "error": error,
+        "error": bool(error),
         "discount_percent": discount_percent,
         "is_custom_discount": is_custom_discount,
         "chart_labels": [f"{r['team1']} vs {r['team2']}" for r in top_results],
@@ -1018,8 +1156,9 @@ def api_page_data():
     lang = resolve_lang()
     try:
         data = build_page_data(lang=lang)
-    except Exception as exc:  # noqa: BLE001 - Fehler ans Frontend durchreichen statt 500
-        return {"error": str(exc)}
+    except Exception:  # noqa: BLE001 - generisch antworten, Details nur ins Log
+        app.logger.exception("page-data fehlgeschlagen")
+        return {"error": True}
 
     data.pop("t", None)
     data.pop("supported_langs", None)
@@ -1049,11 +1188,14 @@ def refresh():
     # Leichtgewichtiger Endpunkt, gedacht für einen externen Cron-Dienst
     # (z. B. cron-job.org), der die Preise auch ohne offenen Browser-Tab
     # periodisch aktualisiert.
+    if REFRESH_KEY and request.args.get("key") != REFRESH_KEY:
+        return {"status": "forbidden"}, 403
     try:
         get_team_tokens(force=True)
         return {"status": "ok", "generated_at": time.strftime("%d.%m.%Y %H:%M:%S")}
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "error", "message": str(exc)}, 500
+    except Exception:  # noqa: BLE001 - generisch antworten, Details nur ins Log
+        app.logger.exception("refresh fehlgeschlagen")
+        return {"status": "error"}, 500
 
 
 if __name__ == "__main__":
