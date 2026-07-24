@@ -444,20 +444,21 @@
     .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
     .stat-box { padding: 0.5rem 0.6rem; }
     .stat-box .value { font-size: 0.92rem; overflow-wrap: anywhere; }
-    /* Card-Layout: oben Rang + Teams + Preis, darunter Sparkline + 24h-Delta */
+    /* Card-Layout: oben Rang + Teams + Preis, darunter rechts das 24h-Delta.
+       Die Sparkline wird auf Mobile komplett ausgeblendet. */
     .row {
       grid-template-columns: 2.4rem 1fr auto;
       grid-template-areas:
         "rank team price"
-        "rank spark delta";
-      row-gap: 0.35rem;
+        "rank .    delta";
+      row-gap: 0.3rem;
       padding: 0.7rem 0.9rem;
     }
     .rank { grid-area: rank; align-self: start; }
     .team { grid-area: team; }
     .price { grid-area: price; align-self: start; }
-    .sparkline-cell { grid-area: spark; justify-content: flex-start; }
-    .delta { grid-area: delta; align-self: center; }
+    .sparkline-cell { display: none; }
+    .delta { grid-area: delta; }
     .tokens { display: none; }
     .row.head {
       grid-template-columns: 2.4rem 1fr auto;
