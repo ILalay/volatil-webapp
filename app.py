@@ -36,6 +36,10 @@ HISTORY_LOAD_LIMIT = 2000  # maximal geladene Snapshots pro Request
 # Cron-Dienst ?key=<REFRESH_KEY> mitschicken.
 REFRESH_KEY = os.environ.get("REFRESH_KEY")
 
+# Cloudflare Web Analytics (cookielos): Ist der Token gesetzt, wird das
+# Beacon-Snippet gerendert. Der Token ist bewusst öffentlich (steht im HTML).
+CF_ANALYTICS_TOKEN = os.environ.get("CF_ANALYTICS_TOKEN")
+
 # Gist-Fallback (Altbestand)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 GIST_ID = os.environ.get("GIST_ID")
@@ -136,7 +140,7 @@ TRANSLATIONS = {
         "prediction_dataset_label": "Prognose (Modell)",
         "prediction_range_label": "Typische Schwankungsbreite",
         "prediction_disclaimer": "Prognosen sind unsicher und können vom tatsächlichen Verlauf abweichen.",
-        "prediction_deviation": "Prognose (24h): {percent} gegenüber dem aktuellen Preis.",
+        "prediction_deviation": "Prognose (24h): {percent} · typische Schwankung ±{range} %.",
     },
     "en": {
         "eyebrow": "Volatile Shop · Gold Team Stickers",
@@ -185,7 +189,7 @@ TRANSLATIONS = {
         "prediction_dataset_label": "Forecast (model)",
         "prediction_range_label": "Typical range",
         "prediction_disclaimer": "Forecasts are uncertain and may deviate from actual prices.",
-        "prediction_deviation": "Forecast (24h): {percent} vs. the current price.",
+        "prediction_deviation": "Forecast (24h): {percent} · typical range ±{range} %.",
     },
     "zh": {
         "eyebrow": "Volatile Shop · 金色战队贴纸",
@@ -234,7 +238,7 @@ TRANSLATIONS = {
         "prediction_dataset_label": "预测（模型）",
         "prediction_range_label": "典型波动区间",
         "prediction_disclaimer": "预测存在不确定性，可能与实际价格不符。",
-        "prediction_deviation": "预测（24小时）：与当前价格相比 {percent}。",
+        "prediction_deviation": "预测（24小时）：{percent} · 典型波动 ±{range} %。",
     },
 }
 
@@ -1132,6 +1136,7 @@ def render_with_lang(force_token_refresh=False):
             discount_percent=discount_percent,
             is_custom_discount=is_custom_discount,
             history_enabled=history_enabled(),
+            cf_analytics_token=CF_ANALYTICS_TOKEN,
         )
     )
     resp.set_cookie("lang", lang, max_age=60 * 60 * 24 * 365)
