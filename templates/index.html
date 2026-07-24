@@ -37,6 +37,8 @@
     position: relative;
   }
 
+  .switch-sep { width: 1px; align-self: stretch; background: var(--panel-border); margin: 0 0.35rem; }
+
   .lang-switch {
     position: absolute;
     top: 1.3rem;
@@ -449,7 +451,9 @@
     .row.head span:nth-child(3),
     .row.head span:nth-child(4),
     .row.head span:nth-child(5) { display: none; }
-    .lang-switch { position: static; justify-content: flex-end; margin-bottom: 0.8rem; }
+    .switch-sep { width: 1px; align-self: stretch; background: var(--panel-border); margin: 0 0.35rem; }
+
+  .lang-switch { position: static; justify-content: flex-end; margin-bottom: 0.8rem; }
   }
 </style>
 </head>
@@ -460,6 +464,11 @@
     {% for code in supported_langs %}
     <a class="lang-btn {% if code == current_lang %}active{% endif %}"
        href="?lang={{ code }}{% if request.args.get('discount') %}&discount={{ request.args.get('discount') }}{% endif %}">{{ lang_labels[code] }}</a>
+    {% endfor %}
+    <span class="switch-sep"></span>
+    {% for code, sym in currencies.items() %}
+    <a class="lang-btn {% if code == current_currency %}active{% endif %}"
+       href="?currency={{ code }}{% if request.args.get('discount') %}&discount={{ request.args.get('discount') }}{% endif %}">{{ sym }}</a>
     {% endfor %}
   </div>
 
@@ -592,6 +601,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
   const T = {{ t | tojson }};
+  const CUR_SYM = {{ currency_symbol | tojson }};
   const HISTORY_ENABLED = {{ history_enabled | tojson }};
 
   function fmt(str, params) {
@@ -705,7 +715,7 @@
         maintainAspectRatio: false,
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: (item) => `${item.raw.toFixed(2)} ¥` } }
+          tooltip: { callbacks: { label: (item) => `${item.raw.toFixed(2)} ${CUR_SYM}` } }
         },
         scales: {
           x: {
@@ -841,7 +851,7 @@
             filter: (item) => !item.dataset.label.startsWith('_'),
             callbacks: {
               title: (items) => tsTooltipLabel(items[0].label),
-              label: (item) => `${item.dataset.label}: ${item.raw.toFixed(2)} ¥`
+              label: (item) => `${item.dataset.label}: ${item.raw.toFixed(2)} ${CUR_SYM}`
             }
           }
         },
@@ -912,7 +922,7 @@
               tooltip: {
                 callbacks: {
                   title: (items) => tsTooltipLabel(items[0].label),
-                  label: (item) => `${item.raw.toFixed(2)} ¥`
+                  label: (item) => `${item.raw.toFixed(2)} ${CUR_SYM}`
                 }
               }
             },
@@ -998,7 +1008,7 @@
         <span class="sparkline-cell">${m.sparkline_svg ? m.sparkline_svg : '<span class="no-data">–</span>'}</span>
         <span class="delta">${renderDelta(m.change_24h_pct)}</span>
         <span class="tokens">${Math.round(m.tokens)}</span>
-        <span class="price">${m.price_eur.toFixed(2)} ¥</span>
+        <span class="price">${m.price_eur.toFixed(2)} ${CUR_SYM}</span>
       </div>
     `).join('');
     document.getElementById('tableBody').innerHTML = html;
@@ -1035,21 +1045,21 @@
     grid.classList.remove('hidden');
     document.getElementById('historyNotEnough').classList.add('hidden');
 
-    document.getElementById('statCurrent').textContent = stats.current.toFixed(2) + ' ¥';
+    document.getElementById('statCurrent').textContent = stats.current.toFixed(2) + ' ' + CUR_SYM;
 
     const setChange = (elId, abs, pct) => {
       const el = document.getElementById(elId);
       if (abs === null || abs === undefined) { el.textContent = '–'; el.className = 'value'; return; }
       const sign = abs > 0 ? '+' : '';
-      el.textContent = `${sign}${abs.toFixed(2)} ¥` + (pct !== null && pct !== undefined ? ` (${sign}${pct.toFixed(1)}%)` : '');
+      el.textContent = `${sign}${abs.toFixed(2)} ${CUR_SYM}` + (pct !== null && pct !== undefined ? ` (${sign}${pct.toFixed(1)}%)` : '');
       el.className = 'value ' + (abs > 0 ? 'pos' : abs < 0 ? 'neg' : '');
     };
     setChange('statChange', stats.change_abs, stats.change_pct);
     setChange('statChange24h', stats.change_24h_abs, stats.change_24h_pct);
 
-    document.getElementById('statMin').textContent = stats.min.toFixed(2) + ' ¥';
-    document.getElementById('statMax').textContent = stats.max.toFixed(2) + ' ¥';
-    document.getElementById('statAvg').textContent = stats.avg.toFixed(2) + ' ¥';
+    document.getElementById('statMin').textContent = stats.min.toFixed(2) + ' ' + CUR_SYM;
+    document.getElementById('statMax').textContent = stats.max.toFixed(2) + ' ' + CUR_SYM;
+    document.getElementById('statAvg').textContent = stats.avg.toFixed(2) + ' ' + CUR_SYM;
     document.getElementById('statPoints').textContent = stats.count;
   }
 
