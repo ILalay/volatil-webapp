@@ -40,6 +40,13 @@ REFRESH_KEY = os.environ.get("REFRESH_KEY")
 # Beacon-Snippet gerendert. Der Token ist bewusst öffentlich (steht im HTML).
 CF_ANALYTICS_TOKEN = os.environ.get("CF_ANALYTICS_TOKEN")
 
+# Anzeigewährungen. Basis aller Berechnungen bleibt ¥ — die Umrechnung
+# passiert erst bei der Auslieferung. Es gilt KEIN Devisenkurs, sondern die
+# festen Tokenpreise des Shops selbst: 100 Tokens = 153 ¥ = 0,99 $ = 0,89 €.
+CURRENCIES = {"CNY": "¥", "EUR": "€", "USD": "$"}
+DEFAULT_CURRENCY = "CNY"
+SHOP_TOKEN_PRICES = {"CNY": float(TOKENS_PER_100), "EUR": 0.89, "USD": 0.99}
+
 # Gist-Fallback (Altbestand)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 GIST_ID = os.environ.get("GIST_ID")
@@ -262,6 +269,47 @@ def resolve_lang():
 
     best = request.accept_languages.best_match(SUPPORTED_LANGS)
     return best or DEFAULT_LANG
+
+
+def resolve_currency():
+    """Bestimmt die Währung: ?currency= Parameter > Cookie > Standard (¥)."""
+    requested = (request.args.get("currency") or "").upper()
+    if requested in CURRENCIES:
+        return requested
+    cookie_cur = (request.cookies.get("currency") or "").upper()
+    if cookie_cur in CURRENCIES:
+        return cookie_cur
+    return DEFAULT_CURRENCY
+
+
+def get_rate(currency):
+    """Umrechnungsfaktor ¥-Preis -> Zielwährung, abgeleitet aus den festen
+    Tokenpreisen des Shops (kein Devisenkurs)."""
+    return SHOP_TOKEN_PRICES[currency] / SHOP_TOKEN_PRICES["CNY"]
+
+
+def currency_adjusted_translations(lang, currency):
+    """Kopiert das Übersetzungs-Dict, ersetzt das ¥ in den preisbezogenen
+    Labels durch das gewählte Symbol und zeigt im Footer den festen
+    Shop-Tokenpreis der gewählten Währung (z. B. 100 Tokens = 0.99 $)."""
+    t = dict(TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]))
+    if currency == "CNY":
+        return t
+    symbol = CURRENCIES[currency]
+    price = f"{SHOP_TOKEN_PRICES[currency]:.2f}"
+    t["footer_text"] = (
+        t["footer_text"]
+        .replace("153 ¥", f"{price} {symbol}")
+        .replace("¥153", f"{symbol}{price}")
+    )
+    for key in (
+        "price_dataset_label",
+        "cheapest_dataset_label",
+        "fact_longest_expensive",
+        "fact_longest_cheapest",
+    ):
+        t[key] = t[key].replace("¥", symbol)
+    return t
 
 
 # ============================================================
@@ -1067,8 +1115,21 @@ def build_sparklines(results, history):
 
 def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     discount = parse_discount(request.args.get("discount"))
+    currency = resolve_currency()
+    rate = get_rate(currency)
+    symbol = CURRENCIES[currency]
     team_tokens, error = get_team_tokens(force=force_token_refresh)
     results, missing = compute_results(team_tokens, discount)
+
+    def conv(value):
+        return value if value is None else round(value * rate, 2)
+
+    if rate != 1.0:
+        # results kommen frisch aus compute_results und dürfen mutiert werden;
+        # die gecachte History bleibt unangetastet (Basis ¥), konvertiert
+        # werden nur die daraus abgeleiteten Auslieferungswerte.
+        for r in results:
+            r["price_eur"] = conv(r["price_eur"])
 
     chart_size = 15
     top_results = results[:chart_size]
@@ -1093,6 +1154,24 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     preset_values = {p["discount"] for p in DISCOUNT_PRESETS}
     is_custom_discount = discount_percent not in preset_values
 
+    history_stats = compute_history_stats(history)
+    history_prediction = compute_price_prediction(history)
+    facts = compute_facts(history)
+    history_prices = [h["cheapest_price"] for h in history]
+
+    if rate != 1.0:
+        history_prices = [conv(p) for p in history_prices]
+        if history_stats:
+            for key in ("current", "change_abs", "change_24h_abs", "min", "max", "avg"):
+                if key in history_stats:
+                    history_stats[key] = conv(history_stats[key])
+        if history_prediction:
+            for key in ("prices", "optimistic", "conservative"):
+                history_prediction[key] = [conv(p) for p in history_prediction[key]]
+        for f in facts:
+            if "price" in f:
+                f["price"] = conv(f["price"])
+
     return {
         "results": results,
         "missing": missing,
@@ -1105,12 +1184,14 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "chart_prices": [round(r["price_eur"], 2) for r in top_results],
         "history_enabled": history_enabled(),
         "history_labels": [h["timestamp"] for h in history],
-        "history_prices": [h["cheapest_price"] for h in history],
-        "history_stats": compute_history_stats(history),
-        "history_prediction": compute_price_prediction(history),
+        "history_prices": history_prices,
+        "history_stats": history_stats,
+        "history_prediction": history_prediction,
         "match_options": match_options,
-        "facts": compute_facts(history),
-        "t": TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]),
+        "facts": facts,
+        "currency": currency,
+        "currency_symbol": symbol,
+        "t": currency_adjusted_translations(lang, currency),
         "current_lang": lang,
         "supported_langs": SUPPORTED_LANGS,
         "lang_labels": LANG_LABELS,
@@ -1120,6 +1201,8 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
 
 def render_with_lang(force_token_refresh=False):
     lang = resolve_lang()
+    currency = resolve_currency()
+    symbol = CURRENCIES[currency]
     discount = parse_discount(request.args.get("discount"))
     discount_percent = round(discount * 100, 2)
     preset_values = {p["discount"] for p in DISCOUNT_PRESETS}
@@ -1128,8 +1211,11 @@ def render_with_lang(force_token_refresh=False):
     resp = make_response(
         render_template(
             "index.html",
-            t=TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]),
+            t=currency_adjusted_translations(lang, currency),
             current_lang=lang,
+            currencies=CURRENCIES,
+            current_currency=currency,
+            currency_symbol=symbol,
             supported_langs=SUPPORTED_LANGS,
             lang_labels=LANG_LABELS,
             discount_presets=DISCOUNT_PRESETS,
@@ -1140,6 +1226,7 @@ def render_with_lang(force_token_refresh=False):
         )
     )
     resp.set_cookie("lang", lang, max_age=60 * 60 * 24 * 365)
+    resp.set_cookie("currency", currency, max_age=60 * 60 * 24 * 365)
     return resp
 
 
@@ -1184,6 +1271,10 @@ def api_match_history(match_index):
         if value is not None:
             labels.append(snapshot["timestamp"])
             prices.append(value)
+
+    rate = get_rate(resolve_currency())
+    if rate != 1.0:
+        prices = [round(p * rate, 2) for p in prices]
 
     return {"labels": labels, "prices": prices}
 
