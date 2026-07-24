@@ -1,1207 +1,1112 @@
-import json
-import os
-import time
-from datetime import datetime, timedelta
+<!DOCTYPE html>
+<html lang="{{ current_lang }}">
+<head>
+<meta charset="UTF-8">
+<title>Volatil Board – IEM Cologne 2026</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e1013;
+    --panel: #171a1f;
+    --panel-border: #262b32;
+    --text: #e8e6e1;
+    --muted: #7a8085;
+    --good: #6ee7a8;
+    --good-dim: #234233;
+    --amber: #f2b84b;
+    --danger: #e8607a;
+  }
 
-import requests
-from flask import Flask, make_response, render_template, request
+  * { box-sizing: border-box; }
 
-try:
-    import psycopg  # optional: nur nötig, wenn DATABASE_URL gesetzt ist
-except ImportError:  # pragma: no cover
-    psycopg = None
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    padding: 0 0 4rem;
+  }
 
-app = Flask(__name__)
+  header {
+    padding: 2.6rem 1.5rem 1.8rem;
+    max-width: 980px;
+    margin: 0 auto;
+    border-bottom: 1px solid var(--panel-border);
+    position: relative;
+  }
 
-# ============================================================
-# Einstellungen
-# ============================================================
+  .lang-switch {
+    position: absolute;
+    top: 1.3rem;
+    right: 1.5rem;
+    display: flex;
+    gap: 0.4rem;
+  }
 
-API_URL = "https://api.volatileskins.com/v1/volatile-shop/26"
+  .lang-btn {
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 3px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+  }
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MATCH_FILE = os.path.join(BASE_DIR, "iem_cologne_2026_matches_complete.json")
+  .lang-btn.active {
+    color: var(--good);
+    border-color: var(--good);
+  }
 
-DEFAULT_DISCOUNT = 0.96  # 96 % Rabatt (Startwert / Fallback)
-TOKENS_PER_100 = 153     # 100 Tokens = 153 ¥
+  .eyebrow {
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--good);
+    margin: 0 0 0.6rem;
+  }
 
-CACHE_SECONDS = 300  # Wie lange die Tokenpreise zwischengespeichert werden
+  h1 {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+    font-size: clamp(1.9rem, 4vw, 2.7rem);
+    letter-spacing: 0.01em;
+    margin: 0 0 0.5rem;
+    text-transform: uppercase;
+  }
 
-# History-Speicher: bevorzugt Postgres (DATABASE_URL, z. B. Neon),
-# sonst Fallback auf GitHub Gist. Ohne beides läuft die Seite ohne History.
-DATABASE_URL = os.environ.get("DATABASE_URL")
-HISTORY_LOAD_LIMIT = 2000  # maximal geladene Snapshots pro Request
+  .subline {
+    color: var(--muted);
+    font-size: 0.85rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2rem;
+    margin-top: 0.8rem;
+  }
 
-# Optionaler Schutz für /refresh: Ist REFRESH_KEY gesetzt, muss der
-# Cron-Dienst ?key=<REFRESH_KEY> mitschicken.
-REFRESH_KEY = os.environ.get("REFRESH_KEY")
+  .subline span {
+    white-space: nowrap;
+  }
 
-# Cloudflare Web Analytics (cookielos): Ist der Token gesetzt, wird das
-# Beacon-Snippet gerendert. Der Token ist bewusst öffentlich (steht im HTML).
-CF_ANALYTICS_TOKEN = os.environ.get("CF_ANALYTICS_TOKEN")
+  .toolbar {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.8rem;
+    margin-top: 1.2rem;
+  }
 
-# Gist-Fallback (Altbestand)
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-GIST_ID = os.environ.get("GIST_ID")
-HISTORY_FILENAME = "price_history.json"
-MAX_HISTORY_POINTS = 500
-HISTORY_DISCOUNT = DEFAULT_DISCOUNT
-SPARKLINE_POINTS = 20
+  .hidden {
+    display: none !important;
+  }
 
-RENAME = {
-    "Berlin International Gaming": "BIG",
-    "Team Vitality": "Vitality",
-    "Team Spirit": "Spirit",
-    "G2 Esports": "G2",
-    "FURIA Esports": "FURIA",
-    "Heroic": "HEROIC",
-    "Legacy Esports": "Legacy",
-    "Made in Brazil": "MIBR",
-    "Tyloo": "TYLOO",
-    "NRG Esports": "NRG",
-    "B8 Esports": "B8",
-    "Sharks Esports": "Sharks",
-    "Team Liquid": "Liquid",
-    "paiN Gaming": "paiN",
-    "Parivision": "PARIVISION",
-    "9z Team": "9z",
-    "The MongolZ": "The MongolZ",
-    "THUNDER dOWNUNDER": "Thunder Logic",
-    "Sinners": "SINNERS",
-    "mousesports": "MOUZ",
-}
+  .presets-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+  }
 
-# ============================================================
-# CS2-Raritätsstufen als Rabatt-Presets
-# ============================================================
+  .preset-btn {
+    border: 1px solid var(--preset-color, var(--panel-border));
+    background: color-mix(in srgb, var(--preset-color, var(--panel-border)) 14%, transparent);
+    color: var(--preset-color, var(--text));
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    padding: 0.32rem 0.55rem;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease;
+  }
 
-DISCOUNT_PRESETS = [
-    {"name": "Consumer Grade", "color": "#b0c3d9", "discount": 99},
-    {"name": "Industrial Grade", "color": "#5e98d9", "discount": 98},
-    {"name": "Mil-Spec Grade", "color": "#4b69ff", "discount": 96},
-    {"name": "Restricted", "color": "#8847ff", "discount": 93},
-    {"name": "Classified", "color": "#d32ce6", "discount": 89},
-    {"name": "Covert", "color": "#eb4b4b", "discount": 85},
-]
+  .preset-btn:hover {
+    background: color-mix(in srgb, var(--preset-color, var(--panel-border)) 28%, transparent);
+  }
 
-# ============================================================
-# Übersetzungen
-# ============================================================
+  .discount-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+  }
 
-SUPPORTED_LANGS = ["de", "en", "zh"]
-DEFAULT_LANG = "de"
-LANG_LABELS = {"de": "DE", "en": "EN", "zh": "中文"}
+  .discount-form label {
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
 
-TRANSLATIONS = {
-    "de": {
-        "eyebrow": "Volatile Shop · Gold-Teamsticker",
-        "title": "Günstigste Matches",
-        "teams_loaded": "{count} Teams geladen",
-        "matches_calculated": "{count} Matches berechnet",
-        "generated_at": "Stand: {time}",
-        "refresh_button": "Preise neu laden",
-        "discount_label": "Rabatt %",
-        "discount_apply": "Anwenden",
-        "presets_label": "Presets",
-        "custom_toggle": "Eigener Wert",
-        "error_banner": "Aktualisierung fehlgeschlagen, es werden die letzten bekannten Preise angezeigt.",
-        "panel_history_title": "Preisverlauf günstigste Kombination",
-        "stat_current": "Aktuell",
-        "stat_change": "Änderung",
-        "stat_change_24h": "Änderung (24h)",
-        "stat_min": "Minimum",
-        "stat_max": "Maximum",
-        "stat_avg": "Durchschnitt",
-        "stat_points": "Datenpunkte",
-        "history_not_enough": "Noch nicht genug Datenpunkte gesammelt — der Verlauf füllt sich, sobald die Preise ein paar Mal aktualisiert wurden.",
-        "panel_match_history_title": "Verlauf pro Match",
-        "match_history_empty": "Für dieses Match sind noch keine Verlaufsdaten vorhanden.",
-        "panel_top15_title": "Günstigste {n} Matches im Preisvergleich",
-        "table_match": "Match",
-        "table_history": "Verlauf",
-        "table_change_24h": "24h",
-        "table_tokens": "Tokens",
-        "table_price": "Preis",
-        "missing_label": "Nicht gefunden:",
-        "footer_text": "Rabatt {percent} % · Kurs: 100 Tokens = 153 ¥",
-        "price_dataset_label": "Preis (¥)",
-        "cheapest_dataset_label": "Günstigster Preis (¥)",
-        "facts_title": "Fakten",
-        "loading_text": "Lade Preise …",
-        "fact_never_changed": "Der Preis von {match} hat sich seit {duration} nicht verändert.",
-        "fact_longest_expensive": "{match} ist seit {duration} durchgehend das teuerste Match ({price} ¥).",
-        "fact_longest_cheapest": "{match} ist seit {duration} durchgehend das günstigste Match ({price} ¥).",
-        "fact_mover_up": "{match} ist in den letzten 24h am stärksten gestiegen: +{percent}%.",
-        "fact_mover_down": "{match} ist in den letzten 24h am stärksten gefallen: {percent}%.",
-        "duration_days": "{n} Tagen",
-        "duration_hours": "{n} Stunden",
-        "duration_minutes": "{n} Minuten",
-        "duration_moment": "gerade eben",
-        "prediction_dataset_label": "Prognose (Modell)",
-        "prediction_range_label": "Typische Schwankungsbreite",
-        "prediction_disclaimer": "Prognosen sind unsicher und können vom tatsächlichen Verlauf abweichen.",
-        "prediction_deviation": "Prognose (24h): {percent} · typische Schwankung ±{range} %.",
-    },
-    "en": {
-        "eyebrow": "Volatile Shop · Gold Team Stickers",
-        "title": "Cheapest Matches",
-        "teams_loaded": "{count} teams loaded",
-        "matches_calculated": "{count} matches calculated",
-        "generated_at": "As of: {time}",
-        "refresh_button": "Reload prices",
-        "discount_label": "Discount %",
-        "discount_apply": "Apply",
-        "presets_label": "Presets",
-        "custom_toggle": "Custom",
-        "error_banner": "Update failed — showing the last known prices.",
-        "panel_history_title": "Price history — cheapest combination",
-        "stat_current": "Current",
-        "stat_change": "Change",
-        "stat_change_24h": "Change (24h)",
-        "stat_min": "Minimum",
-        "stat_max": "Maximum",
-        "stat_avg": "Average",
-        "stat_points": "Data points",
-        "history_not_enough": "Not enough data points yet — the chart fills in as prices get refreshed a few more times.",
-        "panel_match_history_title": "Per-match history",
-        "match_history_empty": "No history data available yet for this match.",
-        "panel_top15_title": "Cheapest {n} matches compared",
-        "table_match": "Match",
-        "table_history": "Trend",
-        "table_change_24h": "24h",
-        "table_tokens": "Tokens",
-        "table_price": "Price",
-        "missing_label": "Not found:",
-        "footer_text": "Discount {percent}% · Rate: 100 tokens = ¥153",
-        "price_dataset_label": "Price (¥)",
-        "cheapest_dataset_label": "Cheapest price (¥)",
-        "facts_title": "Facts",
-        "loading_text": "Loading prices …",
-        "fact_never_changed": "The price of {match} hasn't changed in {duration}.",
-        "fact_longest_expensive": "{match} has been the most expensive match for {duration} ({price} ¥).",
-        "fact_longest_cheapest": "{match} has been the cheapest match for {duration} ({price} ¥).",
-        "fact_mover_up": "{match} rose the most in the last 24h: +{percent}%.",
-        "fact_mover_down": "{match} fell the most in the last 24h: {percent}%.",
-        "duration_days": "{n} days",
-        "duration_hours": "{n} hours",
-        "duration_minutes": "{n} minutes",
-        "duration_moment": "just now",
-        "prediction_dataset_label": "Forecast (model)",
-        "prediction_range_label": "Typical range",
-        "prediction_disclaimer": "Forecasts are uncertain and may deviate from actual prices.",
-        "prediction_deviation": "Forecast (24h): {percent} · typical range ±{range} %.",
-    },
-    "zh": {
-        "eyebrow": "Volatile Shop · 金色战队贴纸",
-        "title": "最便宜的比赛",
-        "teams_loaded": "已加载 {count} 支战队",
-        "matches_calculated": "已计算 {count} 场比赛",
-        "generated_at": "更新时间：{time}",
-        "refresh_button": "刷新价格",
-        "discount_label": "折扣 %",
-        "discount_apply": "应用",
-        "presets_label": "预设",
-        "custom_toggle": "自定义",
-        "error_banner": "更新失败，当前显示的是最近一次已知价格。",
-        "panel_history_title": "最便宜组合的价格走势",
-        "stat_current": "当前",
-        "stat_change": "变化",
-        "stat_change_24h": "24小时变化",
-        "stat_min": "最低",
-        "stat_max": "最高",
-        "stat_avg": "平均",
-        "stat_points": "数据点",
-        "history_not_enough": "数据点还不够——价格多刷新几次后走势图就会填满。",
-        "panel_match_history_title": "单场比赛走势",
-        "match_history_empty": "该场比赛暂无历史数据。",
-        "panel_top15_title": "最便宜的 {n} 场比赛对比",
-        "table_match": "比赛",
-        "table_history": "走势",
-        "table_change_24h": "24h",
-        "table_tokens": "代币",
-        "table_price": "价格",
-        "missing_label": "未找到：",
-        "footer_text": "折扣 {percent}% · 汇率：100代币 = ¥153",
-        "price_dataset_label": "价格 (¥)",
-        "cheapest_dataset_label": "最低价格 (¥)",
-        "facts_title": "趣味数据",
-        "loading_text": "正在加载价格 …",
-        "fact_never_changed": "{match} 的价格已经 {duration} 没有变化了。",
-        "fact_longest_expensive": "{match} 已经连续 {duration} 是最贵的比赛（{price} ¥）。",
-        "fact_longest_cheapest": "{match} 已经连续 {duration} 是最便宜的比赛（{price} ¥）。",
-        "fact_mover_up": "{match} 在过去24小时内涨幅最大：+{percent}%。",
-        "fact_mover_down": "{match} 在过去24小时内跌幅最大：{percent}%。",
-        "duration_days": "{n} 天",
-        "duration_hours": "{n} 小时",
-        "duration_minutes": "{n} 分钟",
-        "duration_moment": "刚刚",
-        "prediction_dataset_label": "预测（模型）",
-        "prediction_range_label": "典型波动区间",
-        "prediction_disclaimer": "预测存在不确定性，可能与实际价格不符。",
-        "prediction_deviation": "预测（24小时）：{percent} · 典型波动 ±{range} %。",
-    },
-}
+  .discount-form input[type="number"] {
+    width: 5.5rem;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: 3px;
+    -moz-appearance: textfield;
+  }
 
-# Cache nur für die (teure) API-Abfrage der Tokenpreise.
-_cache = {"team_tokens": None, "timestamp": 0.0, "error": None, "history": []}
+  .discount-form input[type="number"]::-webkit-outer-spin-button,
+  .discount-form input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
 
+  .discount-form input[type="number"]:focus {
+    outline: none;
+    border-color: var(--good);
+  }
 
-# ============================================================
-# Sprachauflösung
-# ============================================================
+  .discount-form button {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--good);
+    background: var(--good-dim);
+    color: var(--good);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
 
-def resolve_lang():
-    """Bestimmt die Sprache: expliziter ?lang= Parameter > Cookie > Browsersprache > Standard."""
-    requested = request.args.get("lang")
-    if requested in SUPPORTED_LANGS:
-        return requested
+  .discount-form button:hover { background: #2c5940; }
 
-    cookie_lang = request.cookies.get("lang")
-    if cookie_lang in SUPPORTED_LANGS:
-        return cookie_lang
+  main {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 1.8rem 1.5rem 0;
+  }
 
-    best = request.accept_languages.best_match(SUPPORTED_LANGS)
-    return best or DEFAULT_LANG
+  /* ---- Skeleton / Shimmer ---- */
+  @keyframes shimmer {
+    0% { background-position: -200px 0; }
+    100% { background-position: calc(200px + 100%) 0; }
+  }
 
+  .skeleton {
+    background: linear-gradient(90deg, #1b1f26 25%, #232832 37%, #1b1f26 63%);
+    background-size: 400% 100%;
+    animation: shimmer 1.4s ease infinite;
+    border-radius: 4px;
+    color: transparent !important;
+  }
 
-# ============================================================
-# Datenbeschaffung
-# ============================================================
+  .skeleton-line {
+    height: 0.9rem;
+    width: 100%;
+  }
 
-def load_team_tokens():
-    """Lädt alle Gold-Teamsticker von der API und liefert {team: tokens}."""
-    team_tokens = {}
-    offset = 0
-    limit = 48
+  /* ---- Facts ---- */
+  .facts {
+    margin-bottom: 1.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
 
-    while True:
-        params = {
-            "limit": limit,
-            "offset": offset,
-            "sortBy": "rank",
-            "sortDir": "asc",
-            "currency": "EUR",
-        }
+  .fact-card {
+    border: 1px solid var(--panel-border);
+    border-left: 3px solid var(--good);
+    border-radius: 4px;
+    background: var(--panel);
+    padding: 0.65rem 0.9rem;
+    font-size: 0.82rem;
+    color: var(--text);
+  }
 
-        response = requests.get(API_URL, params=params, timeout=15)
-        response.raise_for_status()
+  .fact-card.skeleton-fact {
+    border-left-color: var(--panel-border);
+    height: 2.4rem;
+  }
 
-        items = response.json()
+  /* ---- Charts / Panels ---- */
+  .board {
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--panel);
+  }
 
-        if not items:
-            break
+  .chart-panel {
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    background: var(--panel);
+    padding: 1.2rem 1.3rem 0.8rem;
+    margin-bottom: 1.6rem;
+  }
 
-        for item in items:
-            # Nur Gold-Teamsticker
-            if item["rarity"] == 4 and item["isOrg"]:
-                if item["teamName"]:
-                    team = item["teamName"]
-                else:
-                    team = (
-                        item["name"]
-                        .replace("Sticker | ", "")
-                        .replace(" (Gold) | Cologne 2026", "")
-                    )
-                team_tokens[team] = item["tokens"]
+  .chart-panel.collapsed {
+    padding-bottom: 1.2rem;
+  }
 
-        offset += limit
+  .chart-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+    margin: 0 0 1rem;
+  }
 
-    # Teamnamen an Matchliste anpassen
-    for old, new in RENAME.items():
-        if old in team_tokens:
-            team_tokens[new] = team_tokens.pop(old)
+  .chart-panel.collapsed .chart-panel-header {
+    margin-bottom: 0;
+  }
 
-    return team_tokens
+  .chart-panel h2 {
+    font-family: 'Oswald', sans-serif;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0;
+    font-weight: 600;
+  }
 
+  .chart-toggle {
+    color: var(--muted);
+    font-size: 0.75rem;
+    transition: transform 0.15s ease;
+    transform: rotate(0deg);
+  }
 
-def load_matches():
-    with open(MATCH_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)["matches"]
+  .chart-panel.collapsed .chart-toggle {
+    transform: rotate(-90deg);
+  }
 
+  .chart-panel-body {
+    overflow: hidden;
+  }
 
-# ============================================================
-# Preisverlauf (History) via Postgres (Neon) mit Gist-Fallback
-# ============================================================
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 0.7rem;
+    margin-bottom: 1.1rem;
+  }
 
-def db_enabled():
-    return bool(DATABASE_URL and psycopg is not None)
+  .stat-box {
+    border: 1px solid var(--panel-border);
+    border-radius: 5px;
+    padding: 0.6rem 0.75rem;
+    background: #12151a;
+  }
 
+  .stat-box .label {
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
 
-def gist_enabled():
-    return bool(GITHUB_TOKEN and GIST_ID)
+  .stat-box .value {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text);
+  }
 
+  .stat-box .value.pos { color: var(--danger); }
+  .stat-box .value.neg { color: var(--good); }
 
-def history_enabled():
-    return db_enabled() or gist_enabled()
+  .chart-panel.collapsed .chart-panel-body {
+    display: none;
+  }
 
+  .chart-panel canvas {
+    max-height: 440px;
+  }
 
-_db_initialized = False
+  .match-select {
+    width: 100%;
+    background: #12151a;
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+  }
 
+  .match-select:focus {
+    outline: none;
+    border-color: var(--good);
+  }
 
-def _db_connect():
-    return psycopg.connect(DATABASE_URL, connect_timeout=10)
+  .row {
+    display: grid;
+    grid-template-columns: 3.2rem 1fr 6.5rem 5.5rem 7rem 8rem;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--panel-border);
+    font-size: 0.86rem;
+  }
 
+  .row:last-child { border-bottom: none; }
 
-def init_db():
-    """Legt das Schema an (idempotent). Wird beim ersten Zugriff aufgerufen."""
-    global _db_initialized
-    if _db_initialized:
-        return
-    with _db_connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS snapshots (
-                    id BIGSERIAL PRIMARY KEY,
-                    ts TIMESTAMP NOT NULL UNIQUE,
-                    cheapest_price DOUBLE PRECISION NOT NULL,
-                    cheapest_match TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS match_prices (
-                    snapshot_id BIGINT NOT NULL
-                        REFERENCES snapshots (id) ON DELETE CASCADE,
-                    match_index INTEGER NOT NULL,
-                    price DOUBLE PRECISION NOT NULL,
-                    PRIMARY KEY (snapshot_id, match_index)
-                );
-                CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots (ts);
-                """
-            )
-    _db_initialized = True
+  .row.head {
+    color: var(--muted);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    background: #12151a;
+  }
 
+  .rank {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 600;
+    color: var(--muted);
+  }
 
-def load_history_from_db(limit=HISTORY_LOAD_LIMIT):
-    """Lädt die letzten Snapshots und liefert exakt die Struktur des
-    bisherigen Gist-Formats, damit der restliche Code unverändert bleibt."""
-    init_db()
-    with _db_connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, ts, cheapest_price, cheapest_match
-                FROM snapshots ORDER BY ts DESC LIMIT %s
-                """,
-                (limit,),
-            )
-            rows = list(reversed(cur.fetchall()))
-            if not rows:
-                return []
-            ids = [r[0] for r in rows]
-            cur.execute(
-                """
-                SELECT snapshot_id, match_index, price
-                FROM match_prices WHERE snapshot_id = ANY(%s)
-                """,
-                (ids,),
-            )
-            prices_by_snap = {}
-            for snap_id, idx, price in cur.fetchall():
-                prices_by_snap.setdefault(snap_id, {})[str(idx)] = price
+  .row.top .rank { color: var(--good); }
+  .row.top { background: linear-gradient(90deg, var(--good-dim), transparent 55%); }
 
-    history = []
-    for snap_id, ts, cheapest_price, cheapest_match in rows:
-        history.append(
-            {
-                "timestamp": ts.strftime("%Y-%m-%dT%H:%M:%S"),
-                "cheapest_price": cheapest_price,
-                "cheapest_match": cheapest_match,
-                "prices": prices_by_snap.get(snap_id, {}),
-            }
-        )
-    return history
+  .team { font-weight: 500; }
 
+  .sparkline-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 
-def save_snapshot_to_db(timestamp_str, cheapest_price, cheapest_match, prices):
-    """Schreibt einen Snapshot. ON CONFLICT verhindert Duplikate, falls
-    mehrere Worker gleichzeitig refreshen (Race-Condition-Schutz)."""
-    init_db()
-    with _db_connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO snapshots (ts, cheapest_price, cheapest_match)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (ts) DO NOTHING
-                RETURNING id
-                """,
-                (timestamp_str, cheapest_price, cheapest_match),
-            )
-            row = cur.fetchone()
-            if row is None:  # Duplikat: anderer Worker war schneller
-                return
-            snap_id = row[0]
-            cur.executemany(
-                """
-                INSERT INTO match_prices (snapshot_id, match_index, price)
-                VALUES (%s, %s, %s)
-                ON CONFLICT DO NOTHING
-                """,
-                [(snap_id, int(idx), price) for idx, price in prices.items()],
-            )
+  .sparkline-cell .no-data {
+    color: var(--muted);
+    font-size: 0.72rem;
+  }
+  .vs { color: var(--muted); font-size: 0.72rem; margin: 0 0.4rem; }
 
+  .tokens { color: var(--amber); text-align: right; }
 
-def load_history_from_gist():
-    if not gist_enabled():
-        return []
+  .delta { text-align: right; font-size: 0.78rem; white-space: nowrap; }
+  .delta-up { color: var(--danger); }    /* teurer = schlecht für Käufer */
+  .delta-down { color: var(--good); }    /* billiger = gut */
+  .delta-flat, .delta-none { color: var(--muted); }
+  .price {
+    text-align: right;
+    font-weight: 700;
+    color: var(--text);
+  }
 
-    response = requests.get(
-        f"https://api.github.com/gists/{GIST_ID}",
-        headers={
-            "Authorization": f"token {GITHUB_TOKEN}",
-            "Accept": "application/vnd.github+json",
+  .row.top .price { color: var(--good); }
+
+  .missing {
+    margin-top: 2rem;
+    padding: 1rem 1.2rem;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+
+  .missing b { color: var(--danger); }
+
+  .error-banner {
+    margin: 1.5rem 0;
+    padding: 1rem 1.2rem;
+    border: 1px solid var(--danger);
+    border-radius: 6px;
+    color: var(--danger);
+    font-size: 0.82rem;
+    background: #241419;
+  }
+
+  footer {
+    max-width: 980px;
+    margin: 2.5rem auto 0;
+    padding: 0 1.5rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+  }
+
+  @media (max-width: 640px) {
+    /* Card-Layout: oben Rang + Teams + Preis, darunter Sparkline + 24h-Delta */
+    .row {
+      grid-template-columns: 2.4rem 1fr auto;
+      grid-template-areas:
+        "rank team price"
+        "rank spark delta";
+      row-gap: 0.35rem;
+      padding: 0.7rem 0.9rem;
+    }
+    .rank { grid-area: rank; align-self: start; }
+    .team { grid-area: team; }
+    .price { grid-area: price; align-self: start; }
+    .sparkline-cell { grid-area: spark; justify-content: flex-start; }
+    .delta { grid-area: delta; align-self: center; }
+    .tokens { display: none; }
+    .row.head {
+      grid-template-columns: 2.4rem 1fr auto;
+      grid-template-areas: "rank team price";
+    }
+    .row.head span:nth-child(3),
+    .row.head span:nth-child(4),
+    .row.head span:nth-child(5) { display: none; }
+    .lang-switch { position: static; justify-content: flex-end; margin-bottom: 0.8rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="lang-switch">
+    {% for code in supported_langs %}
+    <a class="lang-btn {% if code == current_lang %}active{% endif %}"
+       href="?lang={{ code }}{% if request.args.get('discount') %}&discount={{ request.args.get('discount') }}{% endif %}">{{ lang_labels[code] }}</a>
+    {% endfor %}
+  </div>
+
+  <p class="eyebrow">{{ t.eyebrow }}</p>
+  <h1>{{ t.title }}</h1>
+  <div class="subline">
+    <span id="teamsLoaded" class="skeleton skeleton-line" style="width: 8rem;">&nbsp;</span>
+    <span id="matchesCalculated" class="skeleton skeleton-line" style="width: 9rem;">&nbsp;</span>
+    <span id="generatedAt" class="skeleton skeleton-line" style="width: 11rem;">&nbsp;</span>
+  </div>
+
+  <div class="toolbar">
+    <div class="presets-row">
+      {% for preset in discount_presets %}
+      <button type="button" class="preset-btn" style="--preset-color: {{ preset.color }};"
+              onclick="applyPreset({{ preset.discount }})">{{ preset.name.split(" ")[0] }} {{ preset.discount }}%</button>
+      {% endfor %}
+      <button type="button" class="preset-btn custom-btn" onclick="toggleCustomDiscount()">{{ t.custom_toggle }}</button>
+    </div>
+
+    <form class="discount-form{% if not is_custom_discount %} hidden{% endif %}" id="discountForm" action="/" method="get">
+      <label for="discount">{{ t.discount_label }}</label>
+      <input type="number" id="discount" name="discount" min="0" max="99.9" step="0.1" value="{{ discount_percent }}">
+      <button type="submit">{{ t.discount_apply }}</button>
+    </form>
+  </div>
+</header>
+
+<main>
+  <div id="errorBanner" class="error-banner hidden"></div>
+
+  {% if history_enabled %}
+  <div class="facts" id="factsSection">
+    <div class="fact-card skeleton-fact skeleton"></div>
+    <div class="fact-card skeleton-fact skeleton"></div>
+  </div>
+  {% endif %}
+
+  {% if history_enabled %}
+  <div class="chart-panel collapsed" id="panel-history">
+    <div class="chart-panel-header" onclick="togglePanel('panel-history')">
+      <h2>{{ t.panel_history_title }}</h2>
+      <span class="chart-toggle">▼</span>
+    </div>
+    <div class="chart-panel-body">
+      <div id="historyStatsGrid" class="stats-grid hidden">
+        <div class="stat-box"><div class="label">{{ t.stat_current }}</div><div class="value" id="statCurrent">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_change }}</div><div class="value" id="statChange">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_change_24h }}</div><div class="value" id="statChange24h">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_min }}</div><div class="value" id="statMin">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_max }}</div><div class="value" id="statMax">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_avg }}</div><div class="value" id="statAvg">–</div></div>
+        <div class="stat-box"><div class="label">{{ t.stat_points }}</div><div class="value" id="statPoints">–</div></div>
+      </div>
+      <canvas id="historyChart" height="90" class="hidden"></canvas>
+      <p id="predictionDisclaimer" class="hidden" style="color: var(--muted); font-size: 0.72rem; margin: 0.7rem 0 0;">
+        {{ t.prediction_disclaimer }}
+      </p>
+      <p id="historyNotEnough" style="color: var(--muted); font-size: 0.82rem; margin: 0;">
+        {{ t.history_not_enough }}
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if history_enabled %}
+  <div class="chart-panel collapsed" id="panel-match-history">
+    <div class="chart-panel-header" onclick="togglePanel('panel-match-history')">
+      <h2>{{ t.panel_match_history_title }}</h2>
+      <span class="chart-toggle">▼</span>
+    </div>
+    <div class="chart-panel-body">
+      <select id="matchSelect" class="match-select"></select>
+      <canvas id="matchHistoryChart" height="100"></canvas>
+      <p id="matchHistoryEmpty" style="color: var(--muted); font-size: 0.82rem; margin-top: 0.8rem; display: none;">
+        {{ t.match_history_empty }}
+      </p>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="chart-panel collapsed" id="panel-top15">
+    <div class="chart-panel-header" onclick="togglePanel('panel-top15')">
+      <h2 id="top15Title">{{ t.panel_top15_title.format(n=0) }}</h2>
+      <span class="chart-toggle">▼</span>
+    </div>
+    <div class="chart-panel-body">
+      <canvas id="priceChart" height="420"></canvas>
+    </div>
+  </div>
+
+  <div class="board">
+    <div class="row head">
+      <span>#</span>
+      <span>{{ t.table_match }}</span>
+      <span style="text-align:center;">{{ t.table_history }}</span>
+      <span style="text-align:right;">{{ t.table_change_24h }}</span>
+      <span style="text-align:right;">{{ t.table_tokens }}</span>
+      <span style="text-align:right;">{{ t.table_price }}</span>
+    </div>
+    <div id="tableBody">
+      {% for i in range(8) %}
+      <div class="row">
+        <span class="rank">{{ "%02d"|format(i+1) }}</span>
+        <span class="team skeleton skeleton-line" style="width: 60%;">&nbsp;</span>
+        <span class="sparkline-cell"></span>
+        <span class="delta"></span>
+        <span class="tokens skeleton skeleton-line"></span>
+        <span class="price skeleton skeleton-line"></span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div id="missingBox" class="missing hidden">
+    <b>{{ t.missing_label }}</b> <span class="missing-list"></span>
+  </div>
+</main>
+
+<footer>
+  {{ t.footer_text.format(percent=discount_percent) }}
+</footer>
+
+{% if cf_analytics_token %}
+<!-- Cloudflare Web Analytics: cookielos, keine persistenten Identifier -->
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js"
+        data-cf-beacon='{"token": "{{ cf_analytics_token }}"}'></script>
+{% endif %}
+</body>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+  const T = {{ t | tojson }};
+  const HISTORY_ENABLED = {{ history_enabled | tojson }};
+
+  function fmt(str, params) {
+    return str.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? params[k] : ''));
+  }
+
+  // Schutz gegen XSS: externe Strings (Teamnamen von der Volatile-API)
+  // niemals ungefiltert per innerHTML einfügen.
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
+  // "2026-07-23T14:05:00" -> Achse: "14:05" / Tooltip: "23.07.2026 · 14:05"
+  function tsAxisLabel(ts) {
+    if (typeof ts !== 'string' || ts.length < 16) return ts;
+    return ts.slice(11, 16);
+  }
+  function tsTooltipLabel(ts) {
+    if (typeof ts !== 'string' || ts.length < 16) return ts;
+    return `${ts.slice(8, 10)}.${ts.slice(5, 7)}.${ts.slice(0, 4)} · ${ts.slice(11, 16)}`;
+  }
+
+  // Zeichnet im History-Chart eine gestrichelte Trennlinie am "Jetzt"-Punkt
+  // und hinterlegt den Prognosebereich dezent.
+  const forecastShadePlugin = {
+    id: 'forecastShade',
+    beforeDatasetsDraw(chart, _args, opts) {
+      if (!opts || opts.startIndex == null) return;
+      const { ctx, chartArea, scales } = chart;
+      const x = scales.x.getPixelForValue(opts.startIndex);
+      if (!isFinite(x)) return;
+      ctx.save();
+      ctx.fillStyle = 'rgba(242, 184, 75, 0.05)';
+      ctx.fillRect(x, chartArea.top, chartArea.right - x, chartArea.bottom - chartArea.top);
+      ctx.strokeStyle = 'rgba(242, 184, 75, 0.45)';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, chartArea.top);
+      ctx.lineTo(x, chartArea.bottom);
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  function formatDuration(seconds) {
+    if (seconds >= 86400) return fmt(T.duration_days, { n: Math.floor(seconds / 86400) });
+    if (seconds >= 3600) return fmt(T.duration_hours, { n: Math.floor(seconds / 3600) });
+    if (seconds >= 60) return fmt(T.duration_minutes, { n: Math.floor(seconds / 60) });
+    return T.duration_moment;
+  }
+
+  function renderFactText(f) {
+    switch (f.type) {
+      case 'never_changed':
+        return fmt(T.fact_never_changed, { match: esc(f.match), duration: formatDuration(f.duration_seconds) });
+      case 'longest_expensive':
+        return fmt(T.fact_longest_expensive, { match: esc(f.match), duration: formatDuration(f.duration_seconds), price: f.price.toFixed(2) });
+      case 'longest_cheapest':
+        return fmt(T.fact_longest_cheapest, { match: esc(f.match), duration: formatDuration(f.duration_seconds), price: f.price.toFixed(2) });
+      case 'mover_up':
+        return fmt(T.fact_mover_up, { match: esc(f.match), percent: f.percent.toFixed(1) });
+      case 'mover_down':
+        return fmt(T.fact_mover_down, { match: esc(f.match), percent: Math.abs(f.percent).toFixed(1) });
+      default:
+        return '';
+    }
+  }
+
+  function applyPreset(discountValue) {
+    document.getElementById('discount').value = discountValue;
+    document.getElementById('discountForm').submit();
+  }
+
+  function toggleCustomDiscount() {
+    const form = document.getElementById('discountForm');
+    form.classList.toggle('hidden');
+    if (!form.classList.contains('hidden')) {
+      document.getElementById('discount').focus();
+    }
+  }
+
+  // Diese Variablen werden erst gefüllt, sobald /api/page-data geantwortet hat.
+  let chartLabels = [];
+  let chartPrices = [];
+  let historyLabels = [];
+  let historyPrices = [];
+  let historyPrediction = null;
+  let pageData = null;
+
+  let top15Initialized = false;
+  function initTop15Chart() {
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: chartLabels,
+        datasets: [{
+          label: T.price_dataset_label,
+          data: chartPrices,
+          backgroundColor: chartPrices.map((_, i) => i < 3 ? 'rgba(110, 231, 168, 0.85)' : 'rgba(242, 184, 75, 0.55)'),
+          borderRadius: 3,
+          maxBarThickness: 28
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (item) => `${item.raw.toFixed(2)} ¥` } }
         },
-        timeout=10,
-    )
-    response.raise_for_status()
-
-    gist = response.json()
-    file_info = gist.get("files", {}).get(HISTORY_FILENAME)
-    if not file_info:
-        return []
-
-    try:
-        raw_history = json.loads(file_info.get("content", "[]"))
-    except ValueError:
-        return []
-
-    normalized = []
-    for entry in raw_history:
-        entry.setdefault("cheapest_price", entry.get("price"))
-        entry.setdefault("cheapest_match", entry.get("match"))
-        entry.setdefault("prices", {})
-        normalized.append(entry)
-
-    return normalized
-
-
-def save_history_to_gist(history):
-    if not gist_enabled():
-        return
-
-    trimmed = history[-MAX_HISTORY_POINTS:]
-
-    response = requests.patch(
-        f"https://api.github.com/gists/{GIST_ID}",
-        headers={
-            "Authorization": f"token {GITHUB_TOKEN}",
-            "Accept": "application/vnd.github+json",
-        },
-        json={"files": {HISTORY_FILENAME: {"content": json.dumps(trimmed)}}},
-        timeout=10,
-    )
-    response.raise_for_status()
-
-
-def append_history_point(team_tokens):
-    """Berechnet die Preise aller Matches (fixer Referenz-Rabatt) und
-    persistiert einen vollständigen Snapshot — bevorzugt in Postgres,
-    sonst im Gist-Fallback."""
-    if not history_enabled():
-        return []
-
-    results, _ = compute_results(team_tokens, HISTORY_DISCOUNT)
-
-    if db_enabled():
-        if results:
-            cheapest = results[0]
-            save_snapshot_to_db(
-                time.strftime("%Y-%m-%dT%H:%M:%S"),
-                round(cheapest["price_eur"], 2),
-                f"{cheapest['team1']} vs {cheapest['team2']}",
-                {str(r["match_index"]): round(r["price_eur"], 2) for r in results},
-            )
-        return load_history_from_db()
-
-    history = load_history_from_gist()
-    if not results:
-        return history
-
-    cheapest = results[0]
-    history.append(
-        {
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "cheapest_price": round(cheapest["price_eur"], 2),
-            "cheapest_match": f"{cheapest['team1']} vs {cheapest['team2']}",
-            "prices": {str(r["match_index"]): round(r["price_eur"], 2) for r in results},
+        scales: {
+          x: {
+            ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' } },
+            grid: { color: '#262b32' }
+          },
+          y: {
+            ticks: { color: '#e8e6e1', font: { family: 'JetBrains Mono', size: 11 } },
+            grid: { display: false }
+          }
         }
-    )
-    save_history_to_gist(history)
-    return history
+      }
+    });
+  }
 
+  let historySummaryInitialized = false;
+  function initHistorySummaryChart() {
+    const historyCanvas = document.getElementById('historyChart');
+    if (!historyCanvas || historyLabels.length < 2) return;
 
-def get_team_tokens(force=False):
-    """Team-Tokens mit Cache laden. Wirft eine Exception, wenn nichts geladen werden kann."""
-    now = time.time()
-    stale = (now - _cache["timestamp"]) > CACHE_SECONDS
+    historyCanvas.classList.remove('hidden');
 
-    if force or _cache["team_tokens"] is None or stale:
-        try:
-            _cache["team_tokens"] = load_team_tokens()
-            _cache["error"] = None
-            _cache["timestamp"] = now
-            try:
-                _cache["history"] = append_history_point(_cache["team_tokens"])
-            except Exception:  # noqa: BLE001 - History-Ausfall darf die Seite nicht killen
-                app.logger.exception("History-Update fehlgeschlagen")
-        except (requests.exceptions.RequestException, KeyError, ValueError) as exc:
-            _cache["error"] = str(exc)
-            if _cache["team_tokens"] is None:
-                raise
+    const labels = historyLabels.slice();
+    const actualData = historyPrices.slice();
+    const datasets = [{
+      label: T.cheapest_dataset_label,
+      data: actualData,
+      borderColor: 'rgba(110, 231, 168, 0.9)',
+      backgroundColor: 'rgba(110, 231, 168, 0.06)',
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointBackgroundColor: 'rgba(110, 231, 168, 0.9)',
+      borderWidth: 2,
+      stepped: true,
+      fill: true
+    }];
 
-    return _cache["team_tokens"], _cache["error"]
+    const hasPrediction = historyPrediction && historyPrediction.labels && historyPrediction.labels.length > 0;
+    if (hasPrediction) {
+      labels.push(...historyPrediction.labels);
+      for (let i = 0; i < historyPrediction.labels.length; i++) actualData.push(null);
 
+      const predictionData = new Array(historyLabels.length - 1).fill(null);
+      predictionData.push(historyPrices[historyPrices.length - 1]); // Anschluss an letzten echten Punkt
+      predictionData.push(...historyPrediction.prices);
 
-def compute_results(team_tokens, discount):
-    matches = load_matches()
+      datasets.push({
+        label: T.prediction_dataset_label,
+        data: predictionData,
+        borderColor: 'rgba(242, 184, 75, 1)',
+        borderDash: [6, 4],
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointBackgroundColor: 'rgba(242, 184, 75, 1)',
+        borderWidth: 2.5,
+        tension: 0,
+        fill: false
+      });
 
-    results = []
-    missing = set()
+      // Schwankungsband: gefüllte Fläche zwischen optimistischem und
+      // konservativem Szenario — zeigt die historisch typische Bewegung
+      // über den jeweiligen Horizont, standardmäßig sichtbar.
+      const opt = historyPrediction.optimistic;
+      const cons = historyPrediction.conservative;
+      if (opt && cons && opt.length === cons.length && opt.length > 0) {
+        const pad = () => {
+          const d = new Array(historyLabels.length - 1).fill(null);
+          d.push(historyPrices[historyPrices.length - 1]);
+          return d;
+        };
+        const lowerData = pad(); lowerData.push(...opt);
+        const upperData = pad(); upperData.push(...cons);
+        // Untere Kante (unsichtbare Linie, dient als Füllziel)
+        datasets.push({
+          label: '_range_lower',
+          data: lowerData,
+          borderWidth: 0,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          fill: false,
+          tension: 0
+        });
+        // Obere Kante, füllt bis zur unteren
+        datasets.push({
+          label: T.prediction_range_label,
+          data: upperData,
+          borderWidth: 0,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          backgroundColor: 'rgba(242, 184, 75, 0.14)',
+          fill: '-1',
+          tension: 0
+        });
+      }
 
-    for idx, match in enumerate(matches):
-        team1 = match["team1"]
-        team2 = match["team2"]
-
-        if team1 not in team_tokens:
-            missing.add(team1)
-            continue
-        if team2 not in team_tokens:
-            missing.add(team2)
-            continue
-
-        total_tokens = team_tokens[team1] + team_tokens[team2]
-        discounted_tokens = total_tokens * (1 - discount)
-        price = (discounted_tokens / 100) * TOKENS_PER_100
-
-        results.append(
-            {
-                "match_index": idx,
-                "team1": team1,
-                "team2": team2,
-                "tokens": total_tokens,
-                "discounted_tokens": discounted_tokens,
-                "price_eur": price,
-            }
-        )
-
-    results.sort(key=lambda x: x["price_eur"])
-    return results, sorted(missing)
-
-
-def parse_discount(raw_value):
-    """Erwartet einen Prozentwert als String und liefert einen Faktor
-    zwischen 0 und 0.999 zurück. Bei ungültiger Eingabe wird der
-    Standardwert genutzt."""
-    if raw_value is None or raw_value == "":
-        return DEFAULT_DISCOUNT
-    try:
-        percent = float(raw_value)
-    except ValueError:
-        return DEFAULT_DISCOUNT
-
-    percent = max(0.0, min(percent, 99.9))
-    return percent / 100
-
-
-def compute_history_stats(history):
-    if not history:
-        return None
-
-    prices = [h["cheapest_price"] for h in history]
-    timestamps = [h["timestamp"] for h in history]
-    current = prices[-1]
-
-    # "Änderung": letzte tatsächliche Preisbewegung — überspringt Wiederholungen,
-    # bei denen sich der Preis zwischen zwei Aktualisierungen nicht bewegt hat.
-    previous = None
-    for p in reversed(prices[:-1]):
-        if p != current:
-            previous = p
-            break
-
-    change_abs = round(current - previous, 2) if previous is not None else None
-    change_pct = (
-        round((current - previous) / previous * 100, 1)
-        if previous not in (None, 0)
-        else None
-    )
-
-    # Zusätzlich: Änderung über die letzten ~24 Stunden, falls genug History vorhanden.
-    change_24h_abs = None
-    change_24h_pct = None
-    if len(prices) > 1:
-        try:
-            current_dt = datetime.strptime(timestamps[-1], "%Y-%m-%dT%H:%M:%S")
-            target_dt = current_dt - timedelta(hours=24)
-
-            ref_price = prices[0]  # Fallback: ältester verfügbarer Punkt
-            for ts, p in zip(timestamps, prices):
-                dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
-                if dt <= target_dt:
-                    ref_price = p
-                else:
-                    break
-
-            change_24h_abs = round(current - ref_price, 2)
-            if ref_price:
-                change_24h_pct = round((current - ref_price) / ref_price * 100, 1)
-        except ValueError:
-            pass
-
-    return {
-        "current": round(current, 2),
-        "change_abs": change_abs,
-        "change_pct": change_pct,
-        "change_24h_abs": change_24h_abs,
-        "change_24h_pct": change_24h_pct,
-        "min": round(min(prices), 2),
-        "max": round(max(prices), 2),
-        "avg": round(sum(prices) / len(prices), 2),
-        "count": len(prices),
+      // Hinweis: Abweichung der 24h-Prognose vom aktuellen Preis in Prozent,
+      // plus die halbe Bandbreite am Horizontende als typische Schwankung.
+      const disclaimerEl = document.getElementById('predictionDisclaimer');
+      const lastReal = historyPrices[historyPrices.length - 1];
+      const lastPred = historyPrediction.prices[historyPrediction.prices.length - 1];
+      if (lastReal) {
+        const pct = ((lastPred - lastReal) / lastReal) * 100;
+        const sign = pct > 0 ? '+' : '';
+        let rangePct = 0;
+        if (opt && cons && opt.length > 0) {
+          rangePct = ((cons[cons.length - 1] - opt[opt.length - 1]) / 2 / lastReal) * 100;
+        }
+        disclaimerEl.textContent =
+          fmt(T.prediction_deviation, { percent: `${sign}${pct.toFixed(1)} %`, range: rangePct.toFixed(1) }) +
+          ' ' + T.prediction_disclaimer;
+      }
+      disclaimerEl.classList.remove('hidden');
     }
 
+    new Chart(historyCanvas.getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets },
+      plugins: [forecastShadePlugin],
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          forecastShade: hasPrediction ? { startIndex: historyLabels.length - 1 } : {},
+          legend: {
+            display: hasPrediction,
+            labels: {
+              color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12,
+              filter: (item) => !item.text.startsWith('_')
+            }
+          },
+          tooltip: {
+            filter: (item) => !item.dataset.label.startsWith('_'),
+            callbacks: {
+              title: (items) => tsTooltipLabel(items[0].label),
+              label: (item) => `${item.dataset.label}: ${item.raw.toFixed(2)} ¥`
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: {
+              color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 7,
+              callback: function (value) { return tsAxisLabel(this.getLabelForValue(value)); }
+            },
+            grid: { color: '#262b32' }
+          },
+          y: {
+            ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' } },
+            grid: { color: '#262b32' }
+          }
+        }
+      }
+    });
+  }
 
-def build_sparkline_svg(prices, width=90, height=26):
-    """Baut eine winzige Inline-SVG-Sparkline aus einer Preisliste (chronologisch)."""
-    if len(prices) < 2:
-        return ""
+  const matchSelect = document.getElementById('matchSelect');
+  let matchHistoryChart = null;
+  let matchHistoryInitialized = false;
 
-    min_p, max_p = min(prices), max(prices)
-    price_range = (max_p - min_p) or 1
-    n = len(prices)
-    pad = 2
+  function loadMatchHistory(matchIndex) {
+    if (matchIndex === undefined || matchIndex === null || matchIndex === '') return;
+    fetch(`/api/history/${matchIndex}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const canvas = document.getElementById('matchHistoryChart');
+        const emptyMsg = document.getElementById('matchHistoryEmpty');
 
-    points = []
-    for i, p in enumerate(prices):
-        x = pad + (i / (n - 1)) * (width - 2 * pad)
-        y = height - pad - ((p - min_p) / price_range) * (height - 2 * pad)
-        points.append(f"{x:.1f},{y:.1f}")
+        if (!data.prices || data.prices.length < 2) {
+          canvas.style.display = 'none';
+          emptyMsg.style.display = 'block';
+          if (matchHistoryChart) { matchHistoryChart.destroy(); matchHistoryChart = null; }
+          return;
+        }
 
-    stroke = "#e8607a" if prices[-1] > prices[0] else "#6ee7a8"
-    poly = " ".join(points)
+        canvas.style.display = 'block';
+        emptyMsg.style.display = 'none';
 
-    return (
-        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
-        f'class="sparkline" preserveAspectRatio="none">'
-        f'<polyline fill="none" stroke="{stroke}" stroke-width="1.6" '
-        f'stroke-linejoin="round" stroke-linecap="round" points="{poly}" />'
-        f"</svg>"
-    )
+        if (matchHistoryChart) { matchHistoryChart.destroy(); }
 
-
-def _parse_ts(ts):
-    return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
-
-
-def _holt_damped_fit(ys, alpha, beta, phi):
-    """Gedämpftes Holt-Verfahren (Level + Trend) über eine als gleichabständig
-    behandelte Serie. Liefert (level, trend, residuals) — die Residuen sind die
-    Fehler der einschrittigen Vorhersagen und dienen Backtest + Konfidenzband."""
-    level = ys[0]
-    trend = ys[1] - ys[0]
-    residuals = []
-    for y in ys[1:]:
-        forecast = level + phi * trend
-        residuals.append(y - forecast)
-        new_level = alpha * y + (1 - alpha) * (level + phi * trend)
-        trend = beta * (new_level - level) + (1 - beta) * phi * trend
-        level = new_level
-    return level, trend, residuals
-
-
-def _holt_damped_best(ys, phi=0.9):
-    """Kleiner Grid-Search über Glättungsparameter, minimiert den MAE der
-    einschrittigen Vorhersagen."""
-    best = None
-    for alpha in (0.2, 0.4, 0.6):
-        for beta in (0.05, 0.15, 0.3):
-            level, trend, residuals = _holt_damped_fit(ys, alpha, beta, phi)
-            mae = sum(abs(r) for r in residuals) / len(residuals)
-            if best is None or mae < best["mae"]:
-                best = {
-                    "level": level,
-                    "trend": trend,
-                    "residuals": residuals,
-                    "mae": mae,
-                    "phi": phi,
+        matchHistoryChart = new Chart(canvas.getContext('2d'), {
+          type: 'line',
+          data: {
+            labels: data.labels,
+            datasets: [{
+              label: T.price_dataset_label,
+              data: data.prices,
+              borderColor: 'rgba(242, 184, 75, 0.9)',
+              backgroundColor: 'rgba(242, 184, 75, 0.06)',
+              pointRadius: 0,
+              pointHoverRadius: 4,
+              pointBackgroundColor: 'rgba(242, 184, 75, 0.9)',
+              borderWidth: 2,
+              stepped: true,
+              fill: true
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  title: (items) => tsTooltipLabel(items[0].label),
+                  label: (item) => `${item.raw.toFixed(2)} ¥`
                 }
-    return best
+              }
+            },
+            scales: {
+              x: {
+                ticks: {
+                  color: '#7a8085', font: { family: 'JetBrains Mono', size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 7,
+                  callback: function (value) { return tsAxisLabel(this.getLabelForValue(value)); }
+                },
+                grid: { color: '#262b32' }
+              },
+              y: {
+                ticks: { color: '#7a8085', font: { family: 'JetBrains Mono' } },
+                grid: { color: '#262b32' }
+              }
+            }
+          }
+        });
+      });
+  }
 
+  if (matchSelect) {
+    matchSelect.addEventListener('change', () => loadMatchHistory(matchSelect.value));
+  }
 
-def _seasonal_slot(dt):
-    """3-Stunden-Block der Tageszeit (0-7)."""
-    return dt.hour // 3
+  // Panels starten eingeklappt. Charts werden erst beim ersten Aufklappen
+  // erzeugt (lazy) — und nur, wenn die Daten schon geladen sind.
+  function togglePanel(panelId) {
+    const panel = document.getElementById(panelId);
+    panel.classList.toggle('collapsed');
+    if (panel.classList.contains('collapsed')) return;
+    initChartsForPanel(panelId);
+  }
 
+  function initChartsForPanel(panelId) {
+    if (!pageData) return; // Daten noch nicht da — wird nachgeholt, sobald sie ankommen
 
-def _seasonal_profile(timestamps, prices):
-    """Additives Tageszeitprofil: Preise werden mit einem zentrierten gleitenden
-    Tagesmittel detrended, die Abweichungen pro 3h-Block gesammelt und je Block
-    der Median gebildet. Blöcke mit < 2 Beobachtungen erhalten 0 (neutral)."""
-    n = len(prices)
-    span_h = (timestamps[-1] - timestamps[0]).total_seconds() / 3600.0
-    if span_h <= 0:
-        return None
-    avg_interval_h = span_h / (n - 1)
-    window = max(3, round(24.0 / avg_interval_h))  # ~1 Tag an Punkten
-    half = window // 2
-
-    deviations = {}
-    for i in range(n):
-        lo = max(0, i - half)
-        hi = min(n, i + half + 1)
-        local_mean = sum(prices[lo:hi]) / (hi - lo)
-        slot = _seasonal_slot(timestamps[i])
-        deviations.setdefault(slot, []).append(prices[i] - local_mean)
-
-    profile = {}
-    for slot in range(8):
-        vals = sorted(deviations.get(slot, []))
-        if len(vals) < 2:
-            profile[slot] = 0.0
-            continue
-        m = len(vals)
-        profile[slot] = (
-            vals[m // 2] if m % 2 else (vals[m // 2 - 1] + vals[m // 2]) / 2
-        )
-    return profile
-
-
-def _quantile(sorted_vals, q):
-    """Empirisches Quantil (lineare Interpolation) einer sortierten Liste."""
-    if not sorted_vals:
-        return 0.0
-    pos = q * (len(sorted_vals) - 1)
-    lo = int(pos)
-    hi = min(lo + 1, len(sorted_vals) - 1)
-    frac = pos - lo
-    return sorted_vals[lo] * (1 - frac) + sorted_vals[hi] * frac
-
-
-def compute_price_prediction(history, future_points=None, horizon_hours=24):
-    """Prognose der günstigsten Kombination: gedämpftes Holt-Verfahren
-    (Level + Trend) plus optionales additives Tageszeitprofil (3h-Blöcke).
-
-    Das Profil wird nur angewendet, wenn es im Backtest den mittleren
-    einschrittigen Fehler (MAE) um mindestens 5 % senkt — sonst fällt das
-    Modell automatisch auf reines Level+Trend zurück.
-
-    Zusätzlich werden zwei Szenarien aus den empirischen Residuen-Quantilen
-    abgeleitet: optimistisch (20 %-Quantil, aus Käufersicht = günstiger) und
-    konservativ (80 %-Quantil). Die Spreizung wächst mit dem Horizont.
-    Keine verlässliche Vorhersage — nur eine statistische Fortschreibung.
-
-    future_points=None: Die Anzahl der Prognosepunkte wird automatisch so
-    gewählt, dass das Prognoseraster ungefähr dem History-Intervall entspricht
-    (min. 6, max. 48 Punkte). Auf der Kategorien-Achse des Charts nimmt die
-    Prognose dadurch sichtbar Breite ein, statt am Rand zusammenzuschrumpfen."""
-    if len(history) < 5:
-        return None
-
-    try:
-        timestamps = [_parse_ts(h["timestamp"]) for h in history]
-        prices = [float(h["cheapest_price"]) for h in history]
-    except (KeyError, TypeError, ValueError):
-        return None
-
-    span_h = (timestamps[-1] - timestamps[0]).total_seconds() / 3600.0
-    avg_interval_h = max(span_h / (len(prices) - 1), 1e-6)
-    if future_points is None:
-        future_points = max(6, min(48, round(horizon_hours / avg_interval_h)))
-
-    # --- Variante A: reines Level+Trend auf den Rohpreisen -----------------
-    model_plain = _holt_damped_best(prices)
-
-    # --- Variante B: Level+Trend auf saisonbereinigter Serie ---------------
-    profile = _seasonal_profile(timestamps, prices)
-    model_seasonal = None
-    if profile is not None:
-        adjusted = [
-            p - profile[_seasonal_slot(ts)] for ts, p in zip(timestamps, prices)
-        ]
-        fitted = _holt_damped_best(adjusted)
-        # Backtest-Residuen zurück auf die Originalskala: der einschrittige
-        # Fehler in der bereinigten Serie entspricht dem Fehler der
-        # Gesamtvorhersage (Holt + Profil) gegen den echten Preis.
-        model_seasonal = fitted
-
-    # --- Signifikanz-Check: Profil nur bei >= 5 % MAE-Verbesserung ---------
-    seasonality_used = (
-        model_seasonal is not None
-        and model_seasonal["mae"] <= 0.95 * model_plain["mae"]
-    )
-    model = model_seasonal if seasonality_used else model_plain
-
-    # --- Punktprognose ------------------------------------------------------
-    phi = model["phi"]
-    step = horizon_hours / future_points
-    last_ts = timestamps[-1]
-
-    future_labels = []
-    central = []
-    damp_sum = 0.0
-    for i in range(1, future_points + 1):
-        damp_sum += phi ** i
-        base = model["level"] + model["trend"] * damp_sum
-        future_ts = last_ts + timedelta(hours=step * i)
-        if seasonality_used:
-            base += profile[_seasonal_slot(future_ts)]
-        future_labels.append(future_ts.strftime("%Y-%m-%dT%H:%M:%S"))
-        central.append(max(base, 0.0))
-
-    # --- Szenarien aus horizontbasierten Preisänderungen -------------------
-    # Einschrittige Residuen sind bei Plateau-Preisen fast immer 0 und
-    # unterschätzen die Sprung-Volatilität massiv. Stattdessen: Für jeden
-    # Prognosepunkt die empirischen Quantile der historisch beobachteten
-    # Preisänderungen über genau diesen Zeithorizont ("Wie stark hat sich
-    # der Preis typischerweise in X Stunden bewegt?").
-    steps_per_point = step / avg_interval_h
-    n = len(prices)
-
-    def horizon_quantiles(k):
-        """(q20, q80) der Preisänderungen über k History-Schritte."""
-        k = max(1, min(k, n - 2))
-        diffs = sorted(prices[j + k] - prices[j] for j in range(n - k))
-        if len(diffs) < 5:
-            return None
-        return _quantile(diffs, 0.2), _quantile(diffs, 0.8)
-
-    optimistic = []
-    conservative = []
-    last_q = (0.0, 0.0)
-    last_k = 1
-    for i, base in enumerate(central, start=1):
-        k = round(i * steps_per_point)
-        q = horizon_quantiles(k)
-        if q is None:
-            # Zu wenig Paare für diesen Horizont: letzte bekannte Spanne
-            # mit Wurzel des Horizontverhältnisses fortschreiben.
-            scale = (max(k, 1) / max(last_k, 1)) ** 0.5
-            q = (last_q[0] * scale, last_q[1] * scale)
-        else:
-            last_q, last_k = q, max(k, 1)
-        optimistic.append(max(base + q[0], 0.0))
-        conservative.append(max(base + q[1], 0.0))
-
-    return {
-        "labels": future_labels,
-        "prices": [round(p, 2) for p in central],
-        "optimistic": [round(p, 2) for p in optimistic],
-        "conservative": [round(p, 2) for p in conservative],
-        "seasonality_used": seasonality_used,
-        "mae": round(model_plain["mae"], 3),
-        "mae_seasonal": (
-            round(model_seasonal["mae"], 3) if model_seasonal else None
-        ),
+    if (panelId === 'panel-top15' && !top15Initialized) {
+      initTop15Chart();
+      top15Initialized = true;
+    }
+    if (panelId === 'panel-history' && !historySummaryInitialized) {
+      initHistorySummaryChart();
+      historySummaryInitialized = true;
+    }
+    if (panelId === 'panel-match-history' && !matchHistoryInitialized && matchSelect && matchSelect.options.length > 0) {
+      loadMatchHistory(matchSelect.value);
+      matchHistoryInitialized = true;
     }
 
+    const panel = document.getElementById(panelId);
+    panel.querySelectorAll('canvas').forEach((canvas) => {
+      const chart = Chart.getChart(canvas);
+      if (chart) requestAnimationFrame(() => chart.resize());
+    });
+  }
 
-def compute_facts(history):
-    """Berechnet ein paar kurze, 'Twitter-artige' Fakten aus der History.
-    Liefert strukturierte Daten (sprachneutral) — Formatierung passiert im
-    Frontend anhand der aktuellen Sprache."""
-    if len(history) < 3:
-        return []
+  function initChartsForOpenPanels() {
+    ['panel-top15', 'panel-history', 'panel-match-history'].forEach((id) => {
+      const panel = document.getElementById(id);
+      if (panel && !panel.classList.contains('collapsed')) {
+        initChartsForPanel(id);
+      }
+    });
+  }
 
-    matches = load_matches()
+  // ---- Rendering der nachgeladenen Daten ----
 
-    def label_for(idx):
-        m = matches[int(idx)]
-        return f"{m['team1']} vs {m['team2']}"
+  function renderDelta(pct) {
+    if (pct === null || pct === undefined) return '<span class="delta-none">–</span>';
+    if (pct === 0) return '<span class="delta-flat">± 0.0 %</span>';
+    const up = pct > 0;
+    const arrow = up ? '▲' : '▼';
+    const cls = up ? 'delta-up' : 'delta-down';
+    return `<span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)} %</span>`;
+  }
 
-    series = {}
-    for snap in history:
-        for idx, price in snap.get("prices", {}).items():
-            series.setdefault(idx, []).append((snap["timestamp"], price))
+  function renderTable(results) {
+    const html = results.map((m, i) => `
+      <div class="row ${i < 3 ? 'top' : ''}">
+        <span class="rank">${String(i + 1).padStart(2, '0')}</span>
+        <span class="team">${esc(m.team1)} <span class="vs">vs</span> ${esc(m.team2)}</span>
+        <span class="sparkline-cell">${m.sparkline_svg ? m.sparkline_svg : '<span class="no-data">–</span>'}</span>
+        <span class="delta">${renderDelta(m.change_24h_pct)}</span>
+        <span class="tokens">${Math.round(m.tokens)}</span>
+        <span class="price">${m.price_eur.toFixed(2)} ¥</span>
+      </div>
+    `).join('');
+    document.getElementById('tableBody').innerHTML = html;
+  }
 
-    now_dt = _parse_ts(history[-1]["timestamp"])
-
-    def duration_seconds(ts_start):
-        return (now_dt - _parse_ts(ts_start)).total_seconds()
-
-    facts = []
-
-    # Fakt: Preis hat sich nie verändert (längste Serie mit min. 3 Punkten)
-    unchanged = [
-        (idx, pts) for idx, pts in series.items()
-        if len(pts) >= 3 and len({p for _, p in pts}) == 1
-    ]
-    if unchanged:
-        idx, pts = max(unchanged, key=lambda x: len(x[1]))
-        facts.append({
-            "type": "never_changed",
-            "match": label_for(idx),
-            "duration_seconds": duration_seconds(pts[0][0]),
-            "price": pts[-1][1],
-        })
-
-    # Fakten: aktuelle Serie als teuerstes / günstigstes Match
-    expensive_seq = []
-    cheap_seq = []
-    for snap in history:
-        prices = snap.get("prices", {})
-        if not prices:
-            continue
-        max_idx = max(prices, key=lambda k: prices[k])
-        min_idx = min(prices, key=lambda k: prices[k])
-        expensive_seq.append((snap["timestamp"], max_idx, prices[max_idx]))
-        cheap_seq.append((snap["timestamp"], min_idx, prices[min_idx]))
-
-    def current_streak(seq):
-        if not seq:
-            return None
-        last_idx = seq[-1][1]
-        streak = [seq[-1]]
-        for item in reversed(seq[:-1]):
-            if item[1] == last_idx:
-                streak.append(item)
-            else:
-                break
-        streak.reverse()
-        return last_idx, streak
-
-    result = current_streak(expensive_seq)
-    if result:
-        idx, streak = result
-        if len(streak) >= 2:
-            facts.append({
-                "type": "longest_expensive",
-                "match": label_for(idx),
-                "duration_seconds": duration_seconds(streak[0][0]),
-                "price": streak[-1][2],
-            })
-
-    result = current_streak(cheap_seq)
-    if result:
-        idx, streak = result
-        if len(streak) >= 2:
-            facts.append({
-                "type": "longest_cheapest",
-                "match": label_for(idx),
-                "duration_seconds": duration_seconds(streak[0][0]),
-                "price": streak[-1][2],
-            })
-
-    # Fakt: größter Ausschlag in ~24h
-    target_dt = now_dt - timedelta(hours=24)
-    best_idx, best_pct, best_current = None, 0, None
-    for idx, pts in series.items():
-        current_price = pts[-1][1]
-        ref_price = pts[0][1]
-        for ts, p in pts:
-            if _parse_ts(ts) <= target_dt:
-                ref_price = p
-            else:
-                break
-        if ref_price:
-            pct = (current_price - ref_price) / ref_price * 100
-            if abs(pct) > abs(best_pct):
-                best_pct, best_idx, best_current = pct, idx, current_price
-
-    if best_idx is not None and abs(best_pct) >= 0.5:
-        facts.append({
-            "type": "mover_up" if best_pct > 0 else "mover_down",
-            "match": label_for(best_idx),
-            "percent": round(best_pct, 1),
-            "price": best_current,
-        })
-
-    return facts[:4]
-
-
-def compute_match_changes(history, hours=24):
-    """24h-Preisänderung in Prozent pro Match aus den History-Snapshots.
-    Die History nutzt zwar einen fixen Referenz-Rabatt, aber da der Rabatt
-    multiplikativ wirkt, ist die prozentuale Änderung rabattunabhängig."""
-    if len(history) < 2:
-        return {}
-    try:
-        now_dt = _parse_ts(history[-1]["timestamp"])
-    except (KeyError, ValueError):
-        return {}
-    target_dt = now_dt - timedelta(hours=hours)
-
-    changes = {}
-    series = {}
-    for snap in history:
-        try:
-            dt = _parse_ts(snap["timestamp"])
-        except (KeyError, ValueError):
-            continue
-        for idx, price in snap.get("prices", {}).items():
-            series.setdefault(idx, []).append((dt, price))
-
-    for idx, pts in series.items():
-        if len(pts) < 2:
-            continue
-        current = pts[-1][1]
-        ref = pts[0][1]  # Fallback: ältester Punkt
-        for dt, price in pts:
-            if dt <= target_dt:
-                ref = price
-            else:
-                break
-        if ref:
-            changes[idx] = round((current - ref) / ref * 100, 1)
-    return changes
-
-
-def build_sparklines(results, history):
-    if not history:
-        return {}
-
-    match_indices = {r["match_index"] for r in results}
-    series = {idx: [] for idx in match_indices}
-
-    for snapshot in history:
-        snapshot_prices = snapshot.get("prices", {})
-        for idx in match_indices:
-            value = snapshot_prices.get(str(idx))
-            if value is not None:
-                series[idx].append(value)
-
-    return {
-        idx: build_sparkline_svg(prices[-SPARKLINE_POINTS:])
-        for idx, prices in series.items()
-        if len(prices) >= 2
+  function renderMissing(missing) {
+    const box = document.getElementById('missingBox');
+    if (!missing || missing.length === 0) {
+      box.classList.add('hidden');
+      return;
     }
+    box.classList.remove('hidden');
+    box.querySelector('.missing-list').textContent = missing.join(', ');
+  }
 
+  function renderMatchOptions(options) {
+    if (!matchSelect) return;
+    matchSelect.innerHTML = options.map((o) => `<option value="${Number(o.index)}">${esc(o.label)}</option>`).join('');
+  }
 
-def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
-    discount = parse_discount(request.args.get("discount"))
-    team_tokens, error = get_team_tokens(force=force_token_refresh)
-    results, missing = compute_results(team_tokens, discount)
-
-    chart_size = 15
-    top_results = results[:chart_size]
-
-    history = _cache["history"]
-
-    sparklines = build_sparklines(results, history)
-    changes = compute_match_changes(history)
-    for r in results:
-        r["sparkline_svg"] = sparklines.get(r["match_index"], "")
-        r["change_24h_pct"] = changes.get(str(r["match_index"]))
-
-    match_options = sorted(
-        (
-            {"index": r["match_index"], "label": f"{r['team1']} vs {r['team2']}"}
-            for r in results
-        ),
-        key=lambda x: x["label"],
-    )
-
-    discount_percent = round(discount * 100, 2)
-    preset_values = {p["discount"] for p in DISCOUNT_PRESETS}
-    is_custom_discount = discount_percent not in preset_values
-
-    return {
-        "results": results,
-        "missing": missing,
-        "team_count": len(team_tokens),
-        "generated_at": time.strftime("%d.%m.%Y %H:%M:%S"),
-        "error": bool(error),
-        "discount_percent": discount_percent,
-        "is_custom_discount": is_custom_discount,
-        "chart_labels": [f"{r['team1']} vs {r['team2']}" for r in top_results],
-        "chart_prices": [round(r["price_eur"], 2) for r in top_results],
-        "history_enabled": history_enabled(),
-        "history_labels": [h["timestamp"] for h in history],
-        "history_prices": [h["cheapest_price"] for h in history],
-        "history_stats": compute_history_stats(history),
-        "history_prediction": compute_price_prediction(history),
-        "match_options": match_options,
-        "facts": compute_facts(history),
-        "t": TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]),
-        "current_lang": lang,
-        "supported_langs": SUPPORTED_LANGS,
-        "lang_labels": LANG_LABELS,
-        "discount_presets": DISCOUNT_PRESETS,
+  function renderFacts(facts) {
+    const section = document.getElementById('factsSection');
+    if (!section) return;
+    if (!facts || facts.length === 0) {
+      section.classList.add('hidden');
+      return;
     }
+    section.innerHTML = facts.map((f) => `<div class="fact-card">${renderFactText(f)}</div>`).join('');
+  }
 
+  function renderHistoryStats(stats) {
+    const grid = document.getElementById('historyStatsGrid');
+    if (!stats) return;
+    grid.classList.remove('hidden');
+    document.getElementById('historyNotEnough').classList.add('hidden');
 
-def render_with_lang(force_token_refresh=False):
-    lang = resolve_lang()
-    discount = parse_discount(request.args.get("discount"))
-    discount_percent = round(discount * 100, 2)
-    preset_values = {p["discount"] for p in DISCOUNT_PRESETS}
-    is_custom_discount = discount_percent not in preset_values
+    document.getElementById('statCurrent').textContent = stats.current.toFixed(2) + ' ¥';
 
-    resp = make_response(
-        render_template(
-            "index.html",
-            t=TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]),
-            current_lang=lang,
-            supported_langs=SUPPORTED_LANGS,
-            lang_labels=LANG_LABELS,
-            discount_presets=DISCOUNT_PRESETS,
-            discount_percent=discount_percent,
-            is_custom_discount=is_custom_discount,
-            history_enabled=history_enabled(),
-            cf_analytics_token=CF_ANALYTICS_TOKEN,
-        )
-    )
-    resp.set_cookie("lang", lang, max_age=60 * 60 * 24 * 365)
-    return resp
+    const setChange = (elId, abs, pct) => {
+      const el = document.getElementById(elId);
+      if (abs === null || abs === undefined) { el.textContent = '–'; el.className = 'value'; return; }
+      const sign = abs > 0 ? '+' : '';
+      el.textContent = `${sign}${abs.toFixed(2)} ¥` + (pct !== null && pct !== undefined ? ` (${sign}${pct.toFixed(1)}%)` : '');
+      el.className = 'value ' + (abs > 0 ? 'pos' : abs < 0 ? 'neg' : '');
+    };
+    setChange('statChange', stats.change_abs, stats.change_pct);
+    setChange('statChange24h', stats.change_24h_abs, stats.change_24h_pct);
 
+    document.getElementById('statMin').textContent = stats.min.toFixed(2) + ' ¥';
+    document.getElementById('statMax').textContent = stats.max.toFixed(2) + ' ¥';
+    document.getElementById('statAvg').textContent = stats.avg.toFixed(2) + ' ¥';
+    document.getElementById('statPoints').textContent = stats.count;
+  }
 
-# ============================================================
-# Routen
-# ============================================================
+  function showError(message) {
+    const banner = document.getElementById('errorBanner');
+    banner.textContent = T.error_banner + (message ? ' ' + message : '');
+    banner.classList.remove('hidden');
+  }
 
-@app.route("/")
-def index():
-    # Rendert die Seite SOFORT (Shell + Skeleton), ohne auf die externe
-    # Preis-API zu warten. Die eigentlichen Daten lädt der Browser danach
-    # per /api/page-data nach — dadurch hängt die Seite auch bei einem
-    # Render-Kaltstart oder einer langsamen Volatile-Shop-API nicht.
-    return render_with_lang()
+  function loadPageData() {
+    fetch('/api/page-data')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          showError(data.error);
+          return;
+        }
 
+        pageData = data;
 
-@app.route("/api/page-data")
-def api_page_data():
-    lang = resolve_lang()
-    try:
-        data = build_page_data(lang=lang)
-    except Exception:  # noqa: BLE001 - generisch antworten, Details nur ins Log
-        app.logger.exception("page-data fehlgeschlagen")
-        return {"error": True}
+        document.getElementById('teamsLoaded').classList.remove('skeleton');
+        document.getElementById('teamsLoaded').style.width = 'auto';
+        document.getElementById('teamsLoaded').textContent = fmt(T.teams_loaded, { count: data.team_count });
+        document.getElementById('matchesCalculated').classList.remove('skeleton');
+        document.getElementById('matchesCalculated').style.width = 'auto';
+        document.getElementById('matchesCalculated').textContent = fmt(T.matches_calculated, { count: data.results.length });
+        document.getElementById('generatedAt').classList.remove('skeleton');
+        document.getElementById('generatedAt').style.width = 'auto';
+        document.getElementById('generatedAt').textContent = fmt(T.generated_at, { time: data.generated_at });
 
-    data.pop("t", None)
-    data.pop("supported_langs", None)
-    data.pop("lang_labels", None)
-    data.pop("discount_presets", None)
-    data.pop("current_lang", None)
-    return data
+        document.getElementById('top15Title').textContent = fmt(T.panel_top15_title, { n: data.chart_labels.length });
 
+        renderTable(data.results);
+        renderMissing(data.missing);
+        renderMatchOptions(data.match_options);
 
-@app.route("/api/history/<int:match_index>")
-def api_match_history(match_index):
-    history = _cache["history"]
+        if (HISTORY_ENABLED) {
+          renderFacts(data.facts);
+          if (data.history_stats) renderHistoryStats(data.history_stats);
+        }
 
-    labels = []
-    prices = []
-    for snapshot in history:
-        value = snapshot.get("prices", {}).get(str(match_index))
-        if value is not None:
-            labels.append(snapshot["timestamp"])
-            prices.append(value)
+        chartLabels = data.chart_labels;
+        chartPrices = data.chart_prices;
+        historyLabels = data.history_labels;
+        historyPrices = data.history_prices;
+        historyPrediction = data.history_prediction;
 
-    return {"labels": labels, "prices": prices}
+        initChartsForOpenPanels();
+      })
+      .catch((err) => showError(String(err)));
+  }
 
+  loadPageData();
 
-@app.route("/refresh")
-def refresh():
-    # Leichtgewichtiger Endpunkt, gedacht für einen externen Cron-Dienst
-    # (z. B. cron-job.org), der die Preise auch ohne offenen Browser-Tab
-    # periodisch aktualisiert.
-    if REFRESH_KEY and request.args.get("key") != REFRESH_KEY:
-        return {"status": "forbidden"}, 403
-    try:
-        get_team_tokens(force=True)
-        return {"status": "ok", "generated_at": time.strftime("%d.%m.%Y %H:%M:%S")}
-    except Exception:  # noqa: BLE001 - generisch antworten, Details nur ins Log
-        app.logger.exception("refresh fehlgeschlagen")
-        return {"status": "error"}, 500
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
+  // Lädt die Seite automatisch alle 30 Minuten neu, solange der Tab offen ist.
+  // Für zuverlässige Datensammlung im Hintergrund (auch bei geschlossenem Tab)
+  // sollte zusätzlich ein externer Cron-Dienst /refresh periodisch aufrufen.
+  setTimeout(() => window.location.reload(), 30 * 60 * 1000);
+</script>
+</html>
