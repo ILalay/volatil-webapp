@@ -968,7 +968,7 @@
 
   function loadMatchHistory(matchIndex) {
     if (matchIndex === undefined || matchIndex === null || matchIndex === '') return;
-    fetch(`/api/history/${matchIndex}`)
+    fetch(`/api/history/${matchIndex}` + window.location.search)
       .then((res) => res.json())
       .then((data) => {
         const canvas = document.getElementById('matchHistoryChart');
