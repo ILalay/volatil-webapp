@@ -106,6 +106,12 @@ TRANSLATIONS = {
         "teams_loaded": "{count} Teams geladen",
         "matches_calculated": "{count} Matches berechnet",
         "generated_at": "Stand: {time}",
+        "buy_label": "Kauf-Indikator",
+        "buy_good": "Günstig",
+        "buy_mid": "Neutral",
+        "buy_bad": "Teuer",
+        "buy_detail": "günstiger als {percent} % aller Messungen",
+        "og_description": "Live-Preise & günstigste Gold-Sticker-Kombinationen für die IEM Cologne 2026 — mit Verlauf, Prognose und Kauf-Indikator.",
         "refresh_button": "Preise neu laden",
         "discount_label": "Rabatt %",
         "discount_apply": "Anwenden",
@@ -155,6 +161,12 @@ TRANSLATIONS = {
         "teams_loaded": "{count} teams loaded",
         "matches_calculated": "{count} matches calculated",
         "generated_at": "As of: {time}",
+        "buy_label": "Buy indicator",
+        "buy_good": "Cheap",
+        "buy_mid": "Neutral",
+        "buy_bad": "Expensive",
+        "buy_detail": "cheaper than {percent} % of all measurements",
+        "og_description": "Live prices & cheapest gold sticker combos for IEM Cologne 2026 — with history, forecast and buy indicator.",
         "refresh_button": "Reload prices",
         "discount_label": "Discount %",
         "discount_apply": "Apply",
@@ -204,6 +216,12 @@ TRANSLATIONS = {
         "teams_loaded": "已加载 {count} 支战队",
         "matches_calculated": "已计算 {count} 场比赛",
         "generated_at": "更新时间：{time}",
+        "buy_label": "购买指标",
+        "buy_good": "便宜",
+        "buy_mid": "中性",
+        "buy_bad": "偏贵",
+        "buy_detail": "低于历史 {percent} % 的记录",
+        "og_description": "IEM Cologne 2026 金色贴纸最低价组合实时追踪——含历史走势、预测与购买指标。",
         "refresh_button": "刷新价格",
         "discount_label": "折扣 %",
         "discount_apply": "应用",
@@ -553,7 +571,7 @@ def append_history_point(team_tokens):
         if results:
             cheapest = results[0]
             save_snapshot_to_db(
-                time.strftime("%Y-%m-%dT%H:%M:%S"),
+                time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
                 round(cheapest["price_eur"], 2),
                 f"{cheapest['team1']} vs {cheapest['team2']}",
                 {str(r["match_index"]): round(r["price_eur"], 2) for r in results},
@@ -567,7 +585,7 @@ def append_history_point(team_tokens):
     cheapest = results[0]
     history.append(
         {
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
             "cheapest_price": round(cheapest["price_eur"], 2),
             "cheapest_match": f"{cheapest['team1']} vs {cheapest['team2']}",
             "prices": {str(r["match_index"]): round(r["price_eur"], 2) for r in results},
@@ -1092,6 +1110,46 @@ def compute_match_changes(history, hours=24):
     return changes
 
 
+def compute_buy_indicator(history):
+    """Ordnet den aktuellen günstigsten Preis ins historische Perzentil ein:
+    'aktuell günstiger als X % aller Messungen'. Bei Postgres über die
+    komplette History per SQL, sonst über die geladenen Punkte."""
+    if len(history) < 10:
+        return None
+    current = history[-1]["cheapest_price"]
+
+    if db_enabled():
+        try:
+            with _db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT count(*) FILTER (WHERE cheapest_price > %s),
+                               count(*)
+                        FROM snapshots
+                        """,
+                        (current,),
+                    )
+                    above, total = cur.fetchone()
+        except Exception:  # noqa: BLE001 - Indikator ist optional
+            app.logger.exception("Kauf-Indikator-Query fehlgeschlagen")
+            return None
+    else:
+        above = sum(1 for h in history if h["cheapest_price"] > current)
+        total = len(history)
+
+    if not total:
+        return None
+    percentile = round(above / total * 100)
+    if percentile >= 70:
+        level = "good"
+    elif percentile >= 35:
+        level = "mid"
+    else:
+        level = "bad"
+    return {"percentile": percentile, "level": level}
+
+
 def build_sparklines(results, history):
     if not history:
         return {}
@@ -1176,7 +1234,7 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "results": results,
         "missing": missing,
         "team_count": len(team_tokens),
-        "generated_at": time.strftime("%d.%m.%Y %H:%M:%S"),
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
         "error": bool(error),
         "discount_percent": discount_percent,
         "is_custom_discount": is_custom_discount,
@@ -1186,6 +1244,7 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "history_labels": [h["timestamp"] for h in history],
         "history_prices": history_prices,
         "history_stats": history_stats,
+        "buy_indicator": compute_buy_indicator(history),
         "history_prediction": history_prediction,
         "match_options": match_options,
         "facts": facts,
