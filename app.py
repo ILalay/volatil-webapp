@@ -1174,6 +1174,14 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     def conv(value):
         return value if value is None else round(value * rate, 2)
 
+    # Die History ist mit festem Referenz-Rabatt gespeichert. Da der Rabatt
+    # multiplikativ wirkt, lassen sich alle daraus abgeleiteten Werte exakt
+    # auf den vom Nutzer gewählten Rabatt (und die Währung) umskalieren.
+    hist_factor = rate * (1 - discount) / (1 - HISTORY_DISCOUNT)
+
+    def hconv(value):
+        return value if value is None else round(value * hist_factor, 2)
+
     if rate != 1.0:
         # results kommen frisch aus compute_results und dürfen mutiert werden;
         # die gecachte History bleibt unangetastet (Basis ¥), konvertiert
@@ -1224,18 +1232,18 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     facts = compute_facts(history)
     history_prices = [h["cheapest_price"] for h in history]
 
-    if rate != 1.0:
-        history_prices = [conv(p) for p in history_prices]
+    if hist_factor != 1.0:
+        history_prices = [hconv(p) for p in history_prices]
         if history_stats:
             for key in ("current", "change_all_abs", "change_24h_abs", "min", "max", "avg"):
                 if key in history_stats:
-                    history_stats[key] = conv(history_stats[key])
+                    history_stats[key] = hconv(history_stats[key])
         if history_prediction:
             for key in ("prices", "optimistic", "conservative"):
-                history_prediction[key] = [conv(p) for p in history_prediction[key]]
+                history_prediction[key] = [hconv(p) for p in history_prediction[key]]
         for f in facts:
             if "price" in f:
-                f["price"] = conv(f["price"])
+                f["price"] = hconv(f["price"])
 
     return {
         "results": results,
@@ -1338,9 +1346,10 @@ def api_match_history(match_index):
             labels.append(snapshot["timestamp"])
             prices.append(value)
 
-    rate = get_rate(resolve_currency())
-    if rate != 1.0:
-        prices = [round(p * rate, 2) for p in prices]
+    discount = parse_discount(request.args.get("discount"))
+    factor = get_rate(resolve_currency()) * (1 - discount) / (1 - HISTORY_DISCOUNT)
+    if factor != 1.0:
+        prices = [round(p * factor, 2) for p in prices]
 
     return {"labels": labels, "prices": prices}
 
