@@ -120,8 +120,8 @@ TRANSLATIONS = {
         "error_banner": "Aktualisierung fehlgeschlagen, es werden die letzten bekannten Preise angezeigt.",
         "panel_history_title": "Preisverlauf günstigste Kombination",
         "stat_current": "Aktuell",
-        "stat_change": "Änderung",
         "stat_change_24h": "Änderung (24h)",
+        "stat_change_all": "Gesamt",
         "stat_min": "Minimum",
         "stat_max": "Maximum",
         "stat_avg": "Durchschnitt",
@@ -175,8 +175,8 @@ TRANSLATIONS = {
         "error_banner": "Update failed — showing the last known prices.",
         "panel_history_title": "Price history — cheapest combination",
         "stat_current": "Current",
-        "stat_change": "Change",
         "stat_change_24h": "Change (24h)",
+        "stat_change_all": "All-time",
         "stat_min": "Minimum",
         "stat_max": "Maximum",
         "stat_avg": "Average",
@@ -230,8 +230,8 @@ TRANSLATIONS = {
         "error_banner": "更新失败，当前显示的是最近一次已知价格。",
         "panel_history_title": "最便宜组合的价格走势",
         "stat_current": "当前",
-        "stat_change": "变化",
         "stat_change_24h": "24小时变化",
+        "stat_change_all": "累计",
         "stat_min": "最低",
         "stat_max": "最高",
         "stat_avg": "平均",
@@ -676,19 +676,11 @@ def compute_history_stats(history):
     timestamps = [h["timestamp"] for h in history]
     current = prices[-1]
 
-    # "Änderung": letzte tatsächliche Preisbewegung — überspringt Wiederholungen,
-    # bei denen sich der Preis zwischen zwei Aktualisierungen nicht bewegt hat.
-    previous = None
-    for p in reversed(prices[:-1]):
-        if p != current:
-            previous = p
-            break
-
-    change_abs = round(current - previous, 2) if previous is not None else None
-    change_pct = (
-        round((current - previous) / previous * 100, 1)
-        if previous not in (None, 0)
-        else None
+    # "Gesamt": Änderung gegenüber dem ältesten Punkt der History (Alltime).
+    baseline = prices[0]
+    change_all_abs = round(current - baseline, 2) if baseline else None
+    change_all_pct = (
+        round((current - baseline) / baseline * 100, 1) if baseline else None
     )
 
     # Zusätzlich: Änderung über die letzten ~24 Stunden, falls genug History vorhanden.
@@ -715,8 +707,8 @@ def compute_history_stats(history):
 
     return {
         "current": round(current, 2),
-        "change_abs": change_abs,
-        "change_pct": change_pct,
+        "change_all_abs": change_all_abs,
+        "change_all_pct": change_all_pct,
         "change_24h_abs": change_24h_abs,
         "change_24h_pct": change_24h_pct,
         "min": round(min(prices), 2),
@@ -1213,6 +1205,21 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     is_custom_discount = discount_percent not in preset_values
 
     history_stats = compute_history_stats(history)
+    # Bei Postgres den wirklich ältesten Snapshot als Alltime-Basis nutzen
+    # (die geladene History ist auf die letzten Punkte begrenzt).
+    if history_stats and db_enabled():
+        try:
+            with _db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT cheapest_price FROM snapshots ORDER BY ts LIMIT 1")
+                    row = cur.fetchone()
+            if row and row[0]:
+                baseline = row[0]
+                current = history_stats["current"]
+                history_stats["change_all_abs"] = round(current - baseline, 2)
+                history_stats["change_all_pct"] = round((current - baseline) / baseline * 100, 1)
+        except Exception:  # noqa: BLE001 - Alltime-Basis ist optional
+            app.logger.exception("Alltime-Baseline-Query fehlgeschlagen")
     history_prediction = compute_price_prediction(history)
     facts = compute_facts(history)
     history_prices = [h["cheapest_price"] for h in history]
@@ -1220,7 +1227,7 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     if rate != 1.0:
         history_prices = [conv(p) for p in history_prices]
         if history_stats:
-            for key in ("current", "change_abs", "change_24h_abs", "min", "max", "avg"):
+            for key in ("current", "change_all_abs", "change_24h_abs", "min", "max", "avg"):
                 if key in history_stats:
                     history_stats[key] = conv(history_stats[key])
         if history_prediction:
