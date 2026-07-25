@@ -101,7 +101,7 @@ LANG_LABELS = {"de": "DE", "en": "EN", "zh": "中文"}
 
 TRANSLATIONS = {
     "de": {
-        "eyebrow": "Volatile Shop · Gold-Teamsticker",
+        "eyebrow": "Volatile Analytics · Gold-Teamsticker",
         "title": "Günstigste Matches",
         "teams_loaded": "{count} Teams geladen",
         "matches_calculated": "{count} Matches berechnet",
@@ -156,7 +156,7 @@ TRANSLATIONS = {
         "prediction_deviation": "Prognose (24h): {percent} · typische Schwankung ±{range} %.",
     },
     "en": {
-        "eyebrow": "Volatile Shop · Gold Team Stickers",
+        "eyebrow": "Volatile Analytics · Gold Team Stickers",
         "title": "Cheapest Matches",
         "teams_loaded": "{count} teams loaded",
         "matches_calculated": "{count} matches calculated",
@@ -211,7 +211,7 @@ TRANSLATIONS = {
         "prediction_deviation": "Forecast (24h): {percent} · typical range ±{range} %.",
     },
     "zh": {
-        "eyebrow": "Volatile Shop · 金色战队贴纸",
+        "eyebrow": "Volatile Analytics · 金色战队贴纸",
         "title": "最便宜的比赛",
         "teams_loaded": "已加载 {count} 支战队",
         "matches_calculated": "已计算 {count} 场比赛",
@@ -1273,6 +1273,15 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     }
 
 
+def _skeleton_row_count():
+    """Anzahl Skeleton-Zeilen = echte Matchanzahl, damit die Tabelle beim
+    Laden nicht springt (Layout-Shift/CLS)."""
+    try:
+        return max(1, len(load_matches()))
+    except Exception:  # noqa: BLE001
+        return 8
+
+
 def render_with_lang(force_token_refresh=False):
     lang = resolve_lang()
     currency = resolve_currency()
@@ -1297,6 +1306,7 @@ def render_with_lang(force_token_refresh=False):
             is_custom_discount=is_custom_discount,
             history_enabled=history_enabled(),
             cf_analytics_token=CF_ANALYTICS_TOKEN,
+            skeleton_rows=_skeleton_row_count(),
         )
     )
     resp.set_cookie("lang", lang, max_age=60 * 60 * 24 * 365)
