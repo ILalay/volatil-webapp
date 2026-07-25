@@ -236,6 +236,8 @@
   }
 
   .fact-card {
+    min-height: 2.4rem;
+    box-sizing: border-box;
     border: 1px solid var(--panel-border);
     border-left: 3px solid var(--good);
     border-radius: 4px;
@@ -567,13 +569,15 @@
   <div id="errorBanner" class="error-banner hidden"></div>
 
   {% if history_enabled %}
-  <div class="buy-banner hidden" id="buyBanner">
+  <div class="buy-banner" id="buyBanner">
     <span class="buy-banner-label">{{ t.buy_label }}</span>
-    <span class="buy-banner-value" id="buyBannerValue">–</span>
+    <span class="buy-banner-value skeleton skeleton-line" id="buyBannerValue" style="width: 5rem;">&nbsp;</span>
     <span class="buy-banner-detail" id="buyBannerDetail"></span>
   </div>
 
   <div class="facts" id="factsSection">
+    <div class="fact-card skeleton-fact skeleton"></div>
+    <div class="fact-card skeleton-fact skeleton"></div>
     <div class="fact-card skeleton-fact skeleton"></div>
     <div class="fact-card skeleton-fact skeleton"></div>
   </div>
@@ -645,7 +649,7 @@
       <span style="text-align:right;">{{ t.table_price }}</span>
     </div>
     <div id="tableBody">
-      {% for i in range(8) %}
+      {% for i in range(skeleton_rows) %}
       <div class="row">
         <span class="rank">{{ "%02d"|format(i+1) }}</span>
         <span class="team skeleton skeleton-line" style="width: 60%;">&nbsp;</span>
@@ -1130,10 +1134,13 @@
   }
 
   function renderBuyIndicator(buy) {
-    if (!buy) return;
     const banner = document.getElementById('buyBanner');
+    if (!banner) return;
+    if (!buy) { banner.classList.add('hidden'); return; }
     const map = { good: T.buy_good, mid: T.buy_mid, bad: T.buy_bad };
-    document.getElementById('buyBannerValue').textContent = map[buy.level] || '–';
+    const val = document.getElementById('buyBannerValue');
+    val.textContent = map[buy.level] || '–';
+    val.className = 'buy-banner-value';
     document.getElementById('buyBannerDetail').textContent =
       '· ' + fmt(T.buy_detail, { percent: buy.percentile });
     banner.className = 'buy-banner buy-' + buy.level;
