@@ -338,9 +338,34 @@
 
   .stat-box .value.pos { color: var(--danger); }
   .stat-box .stat-sub { font-size: 0.62rem; color: var(--muted); margin-top: 0.25rem; }
-  .stat-box .value.buy-good { color: var(--good); }
-  .stat-box .value.buy-mid { color: var(--amber); }
-  .stat-box .value.buy-bad { color: var(--danger); }
+
+  .buy-banner {
+    border: 1px solid var(--panel-border);
+    border-left: 3px solid var(--muted);
+    border-radius: 4px;
+    background: var(--panel);
+    padding: 0.65rem 0.9rem;
+    font-size: 0.82rem;
+    margin-bottom: 0.6rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+  .buy-banner-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .buy-banner-value { font-weight: 700; text-transform: uppercase; }
+  .buy-banner-detail { color: var(--muted); font-size: 0.75rem; }
+  .buy-banner.buy-good { border-left-color: var(--good); }
+  .buy-banner.buy-good .buy-banner-value { color: var(--good); }
+  .buy-banner.buy-mid { border-left-color: var(--amber); }
+  .buy-banner.buy-mid .buy-banner-value { color: var(--amber); }
+  .buy-banner.buy-bad { border-left-color: var(--danger); }
+  .buy-banner.buy-bad .buy-banner-value { color: var(--danger); }
   .stat-box .value.neg { color: var(--good); }
 
   .chart-panel.collapsed .chart-panel-body {
@@ -542,6 +567,12 @@
   <div id="errorBanner" class="error-banner hidden"></div>
 
   {% if history_enabled %}
+  <div class="buy-banner hidden" id="buyBanner">
+    <span class="buy-banner-label">{{ t.buy_label }}</span>
+    <span class="buy-banner-value" id="buyBannerValue">–</span>
+    <span class="buy-banner-detail" id="buyBannerDetail"></span>
+  </div>
+
   <div class="facts" id="factsSection">
     <div class="fact-card skeleton-fact skeleton"></div>
     <div class="fact-card skeleton-fact skeleton"></div>
@@ -556,14 +587,12 @@
     </div>
     <div class="chart-panel-body">
       <div id="historyStatsGrid" class="stats-grid hidden">
-        <div class="stat-box hidden" id="buyIndicatorBox">
-          <div class="label">{{ t.buy_label }}</div>
-          <div class="value" id="buyIndicatorValue">–</div>
-          <div class="stat-sub" id="buyIndicatorDetail"></div>
-        </div>
         <div class="stat-box"><div class="label">{{ t.stat_current }}</div><div class="value" id="statCurrent">–</div></div>
-        <div class="stat-box"><div class="label">{{ t.stat_change }}</div><div class="value" id="statChange">–</div></div>
-        <div class="stat-box"><div class="label">{{ t.stat_change_24h }}</div><div class="value" id="statChange24h">–</div></div>
+        <div class="stat-box">
+          <div class="label">{{ t.stat_change_24h }}</div>
+          <div class="value" id="statChange24h">–</div>
+          <div class="stat-sub" id="statChangeAll"></div>
+        </div>
         <div class="stat-box"><div class="label">{{ t.stat_min }}</div><div class="value" id="statMin">–</div></div>
         <div class="stat-box"><div class="label">{{ t.stat_max }}</div><div class="value" id="statMax">–</div></div>
         <div class="stat-box"><div class="label">{{ t.stat_avg }}</div><div class="value" id="statAvg">–</div></div>
@@ -1100,23 +1129,22 @@
     section.innerHTML = facts.map((f) => `<div class="fact-card">${renderFactText(f)}</div>`).join('');
   }
 
+  function renderBuyIndicator(buy) {
+    if (!buy) return;
+    const banner = document.getElementById('buyBanner');
+    const map = { good: T.buy_good, mid: T.buy_mid, bad: T.buy_bad };
+    document.getElementById('buyBannerValue').textContent = map[buy.level] || '–';
+    document.getElementById('buyBannerDetail').textContent =
+      '· ' + fmt(T.buy_detail, { percent: buy.percentile });
+    banner.className = 'buy-banner buy-' + buy.level;
+  }
+
   function renderHistoryStats(stats) {
     const grid = document.getElementById('historyStatsGrid');
     if (!stats) return;
     grid.classList.remove('hidden');
     document.getElementById('historyNotEnough').classList.add('hidden');
 
-    const buy = window.__buyIndicator;
-    if (buy) {
-      const box = document.getElementById('buyIndicatorBox');
-      const val = document.getElementById('buyIndicatorValue');
-      const map = { good: T.buy_good, mid: T.buy_mid, bad: T.buy_bad };
-      val.textContent = map[buy.level] || '–';
-      val.className = 'value buy-' + buy.level;
-      document.getElementById('buyIndicatorDetail').textContent =
-        fmt(T.buy_detail, { percent: buy.percentile });
-      box.classList.remove('hidden');
-    }
     document.getElementById('statCurrent').textContent = stats.current.toFixed(2) + ' ' + CUR_SYM;
 
     const setChange = (elId, abs, pct) => {
@@ -1126,8 +1154,15 @@
       el.textContent = `${sign}${abs.toFixed(2)} ${CUR_SYM}` + (pct !== null && pct !== undefined ? ` (${sign}${pct.toFixed(1)}%)` : '');
       el.className = 'value ' + (abs > 0 ? 'pos' : abs < 0 ? 'neg' : '');
     };
-    setChange('statChange', stats.change_abs, stats.change_pct);
     setChange('statChange24h', stats.change_24h_abs, stats.change_24h_pct);
+    const allEl = document.getElementById('statChangeAll');
+    if (stats.change_all_abs !== null && stats.change_all_abs !== undefined) {
+      const s = stats.change_all_abs > 0 ? '+' : '';
+      allEl.textContent = `${T.stat_change_all}: ${s}${stats.change_all_abs.toFixed(2)} ${CUR_SYM}`
+        + (stats.change_all_pct !== null ? ` (${s}${stats.change_all_pct.toFixed(1)}%)` : '');
+    } else {
+      allEl.textContent = '';
+    }
 
     document.getElementById('statMin').textContent = stats.min.toFixed(2) + ' ' + CUR_SYM;
     document.getElementById('statMax').textContent = stats.max.toFixed(2) + ' ' + CUR_SYM;
@@ -1142,7 +1177,7 @@
   }
 
   function loadPageData() {
-    fetch('/api/page-data')
+    fetch('/api/page-data' + window.location.search)
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {
@@ -1170,7 +1205,7 @@
 
         if (HISTORY_ENABLED) {
           renderFacts(data.facts);
-          window.__buyIndicator = data.buy_indicator;
+          renderBuyIndicator(data.buy_indicator);
           if (data.history_stats) renderHistoryStats(data.history_stats);
         }
 
