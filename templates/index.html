@@ -4,6 +4,27 @@
 <meta charset="UTF-8">
 <title>Volatil Board – IEM Cologne 2026</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="{{ t.og_description }}">
+<meta name="theme-color" content="#0e1013">
+
+<!-- Open Graph / Discord / Social Previews -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Volatil Board">
+<meta property="og:title" content="Volatil Board – IEM Cologne 2026">
+<meta property="og:description" content="{{ t.og_description }}">
+<meta property="og:url" content="https://{{ request.host }}/">
+<meta property="og:image" content="https://{{ request.host }}/static/og-banner.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Volatil Board – IEM Cologne 2026">
+<meta name="twitter:description" content="{{ t.og_description }}">
+<meta name="twitter:image" content="https://{{ request.host }}/static/og-banner.png">
+
+<!-- PWA -->
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -316,6 +337,10 @@
   }
 
   .stat-box .value.pos { color: var(--danger); }
+  .stat-box .stat-sub { font-size: 0.62rem; color: var(--muted); margin-top: 0.25rem; }
+  .stat-box .value.buy-good { color: var(--good); }
+  .stat-box .value.buy-mid { color: var(--amber); }
+  .stat-box .value.buy-bad { color: var(--danger); }
   .stat-box .value.neg { color: var(--good); }
 
   .chart-panel.collapsed .chart-panel-body {
@@ -531,6 +556,11 @@
     </div>
     <div class="chart-panel-body">
       <div id="historyStatsGrid" class="stats-grid hidden">
+        <div class="stat-box hidden" id="buyIndicatorBox">
+          <div class="label">{{ t.buy_label }}</div>
+          <div class="value" id="buyIndicatorValue">–</div>
+          <div class="stat-sub" id="buyIndicatorDetail"></div>
+        </div>
         <div class="stat-box"><div class="label">{{ t.stat_current }}</div><div class="value" id="statCurrent">–</div></div>
         <div class="stat-box"><div class="label">{{ t.stat_change }}</div><div class="value" id="statChange">–</div></div>
         <div class="stat-box"><div class="label">{{ t.stat_change_24h }}</div><div class="value" id="statChange24h">–</div></div>
@@ -633,14 +663,21 @@
     ));
   }
 
-  // "2026-07-23T14:05:00" -> Achse: "14:05" / Tooltip: "23.07.2026 · 14:05"
+  // Timestamps kommen als UTC ("2026-07-23T14:05:00") und werden hier in die
+  // lokale Zeitzone des Besuchers umgerechnet.
+  const p2 = (n) => String(n).padStart(2, '0');
+  function tsToDate(ts) {
+    return new Date(ts + 'Z');  // als UTC interpretieren
+  }
   function tsAxisLabel(ts) {
     if (typeof ts !== 'string' || ts.length < 16) return ts;
-    return ts.slice(11, 16);
+    const d = tsToDate(ts);
+    return `${p2(d.getHours())}:${p2(d.getMinutes())}`;
   }
   function tsTooltipLabel(ts) {
     if (typeof ts !== 'string' || ts.length < 16) return ts;
-    return `${ts.slice(8, 10)}.${ts.slice(5, 7)}.${ts.slice(0, 4)} · ${ts.slice(11, 16)}`;
+    const d = tsToDate(ts);
+    return `${p2(d.getDate())}.${p2(d.getMonth() + 1)}.${d.getFullYear()} · ${p2(d.getHours())}:${p2(d.getMinutes())}`;
   }
 
   // Zeichnet im History-Chart eine gestrichelte Trennlinie am "Jetzt"-Punkt
@@ -1069,6 +1106,17 @@
     grid.classList.remove('hidden');
     document.getElementById('historyNotEnough').classList.add('hidden');
 
+    const buy = window.__buyIndicator;
+    if (buy) {
+      const box = document.getElementById('buyIndicatorBox');
+      const val = document.getElementById('buyIndicatorValue');
+      const map = { good: T.buy_good, mid: T.buy_mid, bad: T.buy_bad };
+      val.textContent = map[buy.level] || '–';
+      val.className = 'value buy-' + buy.level;
+      document.getElementById('buyIndicatorDetail').textContent =
+        fmt(T.buy_detail, { percent: buy.percentile });
+      box.classList.remove('hidden');
+    }
     document.getElementById('statCurrent').textContent = stats.current.toFixed(2) + ' ' + CUR_SYM;
 
     const setChange = (elId, abs, pct) => {
@@ -1112,7 +1160,7 @@
         document.getElementById('matchesCalculated').textContent = fmt(T.matches_calculated, { count: data.results.length });
         document.getElementById('generatedAt').classList.remove('skeleton');
         document.getElementById('generatedAt').style.width = 'auto';
-        document.getElementById('generatedAt').textContent = fmt(T.generated_at, { time: data.generated_at });
+        document.getElementById('generatedAt').textContent = fmt(T.generated_at, { time: tsTooltipLabel(data.generated_at) });
 
         document.getElementById('top15Title').textContent = fmt(T.panel_top15_title, { n: data.chart_labels.length });
 
@@ -1122,6 +1170,7 @@
 
         if (HISTORY_ENABLED) {
           renderFacts(data.facts);
+          window.__buyIndicator = data.buy_indicator;
           if (data.history_stats) renderHistoryStats(data.history_stats);
         }
 
