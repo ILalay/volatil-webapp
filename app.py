@@ -40,12 +40,12 @@ REFRESH_KEY = os.environ.get("REFRESH_KEY")
 # Beacon-Snippet gerendert. Der Token ist bewusst öffentlich (steht im HTML).
 CF_ANALYTICS_TOKEN = os.environ.get("CF_ANALYTICS_TOKEN")
 
-# Anzeigewährungen. Basis aller Berechnungen bleibt ¥ — die Umrechnung
+# Anzeigewährungen. Basis aller Berechnungen bleibt ¥ (JPY) — die Umrechnung
 # passiert erst bei der Auslieferung. Es gilt KEIN Devisenkurs, sondern die
 # festen Tokenpreise des Shops selbst: 100 Tokens = 153 ¥ = 0,99 $ = 0,89 €.
-CURRENCIES = {"CNY": "¥", "EUR": "€", "USD": "$"}
-DEFAULT_CURRENCY = "CNY"
-SHOP_TOKEN_PRICES = {"CNY": float(TOKENS_PER_100), "EUR": 0.89, "USD": 0.99}
+CURRENCIES = {"JPY": "¥", "EUR": "€", "USD": "$"}
+DEFAULT_CURRENCY = "JPY"
+SHOP_TOKEN_PRICES = {"JPY": float(TOKENS_PER_100), "EUR": 0.89, "USD": 0.99}
 
 # Gist-Fallback (Altbestand)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
@@ -303,7 +303,7 @@ def resolve_currency():
 def get_rate(currency):
     """Umrechnungsfaktor ¥-Preis -> Zielwährung, abgeleitet aus den festen
     Tokenpreisen des Shops (kein Devisenkurs)."""
-    return SHOP_TOKEN_PRICES[currency] / SHOP_TOKEN_PRICES["CNY"]
+    return SHOP_TOKEN_PRICES[currency] / SHOP_TOKEN_PRICES["JPY"]
 
 
 def currency_adjusted_translations(lang, currency):
@@ -311,7 +311,7 @@ def currency_adjusted_translations(lang, currency):
     Labels durch das gewählte Symbol und zeigt im Footer den festen
     Shop-Tokenpreis der gewählten Währung (z. B. 100 Tokens = 0.99 $)."""
     t = dict(TRANSLATIONS.get(lang, TRANSLATIONS[DEFAULT_LANG]))
-    if currency == "CNY":
+    if currency == "JPY":
         return t
     symbol = CURRENCIES[currency]
     price = f"{SHOP_TOKEN_PRICES[currency]:.2f}"
