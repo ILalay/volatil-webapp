@@ -1102,6 +1102,23 @@ def compute_match_changes(history, hours=24):
     return changes
 
 
+CHART_MAX_POINTS = 400
+
+
+def downsample_for_chart(labels, prices, max_points=CHART_MAX_POINTS):
+    """Dünnt die Punktzahl fürs Chart aus (gleichmäßig, letzter Punkt bleibt
+    immer erhalten). Stats, Prognose und Kauf-Indikator rechnen weiterhin auf
+    der vollen History — das hier betrifft nur die Darstellung."""
+    n = len(prices)
+    if n <= max_points:
+        return labels, prices
+    step = -(-n // max_points)  # Aufrundende Division
+    idx = list(range(0, n, step))
+    if idx[-1] != n - 1:
+        idx.append(n - 1)
+    return [labels[i] for i in idx], [prices[i] for i in idx]
+
+
 def compute_buy_indicator(history):
     """Ordnet den aktuellen günstigsten Preis ins historische Perzentil ein:
     'aktuell günstiger als X % aller Messungen'. Bei Postgres über die
@@ -1245,6 +1262,10 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
             if "price" in f:
                 f["price"] = hconv(f["price"])
 
+    chart_labels_hist, chart_prices_hist = downsample_for_chart(
+        [h["timestamp"] for h in history], history_prices
+    )
+
     return {
         "results": results,
         "missing": missing,
@@ -1256,8 +1277,8 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "chart_labels": [f"{r['team1']} vs {r['team2']}" for r in top_results],
         "chart_prices": [round(r["price_eur"], 2) for r in top_results],
         "history_enabled": history_enabled(),
-        "history_labels": [h["timestamp"] for h in history],
-        "history_prices": history_prices,
+        "history_labels": chart_labels_hist,
+        "history_prices": chart_prices_hist,
         "history_stats": history_stats,
         "buy_indicator": compute_buy_indicator(history),
         "history_prediction": history_prediction,
