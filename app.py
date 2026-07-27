@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import time
 from datetime import datetime, timedelta
@@ -24,6 +25,12 @@ MATCH_FILE = os.path.join(BASE_DIR, "iem_cologne_2026_matches_complete.json")
 
 DEFAULT_DISCOUNT = 0.96  # 96 % Rabatt (Startwert / Fallback)
 TOKENS_PER_100 = 153     # 100 Tokens = 153 ¥
+
+# Ein Craft besteht aus beiden Teamstickern, dem günstigsten Player-Sticker
+# der beiden Teams und einem pauschalen Aufschlag. Die rabattierte Summe wird
+# vom Shop auf ganze Tokens aufgerundet.
+FLAT_SURCHARGE = 1       # pauschaler Token-Aufschlag auf die Rohsumme
+PLAYER_STICKERS = 1      # Anzahl Player-Sticker im Craft
 
 CACHE_SECONDS = 300  # Wie lange die Tokenpreise zwischengespeichert werden
 
@@ -153,6 +160,7 @@ TRANSLATIONS = {
         "prediction_dataset_label": "Prognose (Modell)",
         "prediction_range_label": "Typische Schwankungsbreite",
         "prediction_disclaimer": "Prognosen sind unsicher und können vom tatsächlichen Verlauf abweichen.",
+        "history_basis_note": "Der Verlauf zeigt den Referenzpreis (nur die beiden Teamsticker). So bleibt die Zeitreihe seit Sammelbeginn vergleichbar. Der vollständige Craft-Preis inklusive Player-Sticker steht in der Tabelle.",
         "prediction_deviation": "Prognose (24h): {percent} · typische Schwankung ±{range} %.",
     },
     "en": {
@@ -208,6 +216,7 @@ TRANSLATIONS = {
         "prediction_dataset_label": "Forecast (model)",
         "prediction_range_label": "Typical range",
         "prediction_disclaimer": "Forecasts are uncertain and may deviate from actual prices.",
+        "history_basis_note": "The chart shows the reference price (both team stickers only), keeping the series comparable since tracking began. The full craft price including player stickers is in the table.",
         "prediction_deviation": "Forecast (24h): {percent} · typical range ±{range} %.",
     },
     "zh": {
@@ -263,12 +272,19 @@ TRANSLATIONS = {
         "prediction_dataset_label": "预测（模型）",
         "prediction_range_label": "典型波动区间",
         "prediction_disclaimer": "预测存在不确定性，可能与实际价格不符。",
+        "history_basis_note": "走势图显示参考价（仅两枚战队贴纸），以保持自开始记录以来的可比性。含选手贴纸的完整定制价格见表格。",
         "prediction_deviation": "预测（24小时）：{percent} · 典型波动 ±{range} %。",
     },
 }
 
 # Cache nur für die (teure) API-Abfrage der Tokenpreise.
-_cache = {"team_tokens": None, "timestamp": 0.0, "error": None, "history": []}
+_cache = {
+    "team_tokens": None,
+    "player_tokens": {},
+    "timestamp": 0.0,
+    "error": None,
+    "history": [],
+}
 
 
 # ============================================================
@@ -335,8 +351,14 @@ def currency_adjusted_translations(lang, currency):
 # ============================================================
 
 def load_team_tokens():
-    """Lädt alle Gold-Teamsticker von der API und liefert {team: tokens}."""
+    """Lädt alle Gold-Sticker von der API.
+
+    Liefert (team_tokens, player_tokens):
+      team_tokens   {team: tokens}          — Gold-Teamsticker (isOrg)
+      player_tokens {team: [tokens, ...]}   — Gold-Playersticker, aufsteigend
+    """
     team_tokens = {}
+    player_tokens = {}
     offset = 0
     limit = 48
 
@@ -358,8 +380,11 @@ def load_team_tokens():
             break
 
         for item in items:
-            # Nur Gold-Teamsticker
-            if item["rarity"] == 4 and item["isOrg"]:
+            if item["rarity"] != 4:
+                continue
+
+            if item["isOrg"]:
+                # Gold-Teamsticker
                 if item["teamName"]:
                     team = item["teamName"]
                 else:
@@ -369,15 +394,23 @@ def load_team_tokens():
                         .replace(" (Gold) | Cologne 2026", "")
                     )
                 team_tokens[team] = item["tokens"]
+            elif item.get("teamName"):
+                # Gold-Playersticker, dem Team zugeordnet
+                player_tokens.setdefault(item["teamName"], []).append(item["tokens"])
 
         offset += limit
 
     # Teamnamen an Matchliste anpassen
-    for old, new in RENAME.items():
-        if old in team_tokens:
-            team_tokens[new] = team_tokens.pop(old)
+    for old_name, new_name in RENAME.items():
+        if old_name in team_tokens:
+            team_tokens[new_name] = team_tokens.pop(old_name)
+        if old_name in player_tokens:
+            player_tokens[new_name] = player_tokens.pop(old_name)
 
-    return team_tokens
+    for team in player_tokens:
+        player_tokens[team].sort()
+
+    return team_tokens, player_tokens
 
 
 def load_matches():
@@ -431,6 +464,10 @@ def init_db():
                     PRIMARY KEY (snapshot_id, match_index)
                 );
                 CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots (ts);
+                -- Nachträglich ergänzt: tatsächlicher Craft-Preis. Alte Zeilen
+                -- bleiben NULL, da sich der Wert rückwirkend nicht bilden lässt.
+                ALTER TABLE snapshots
+                    ADD COLUMN IF NOT EXISTS cheapest_price_full DOUBLE PRECISION;
                 """
             )
     _db_initialized = True
@@ -444,7 +481,7 @@ def load_history_from_db(limit=HISTORY_LOAD_LIMIT):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, ts, cheapest_price, cheapest_match
+                SELECT id, ts, cheapest_price, cheapest_match, cheapest_price_full
                 FROM snapshots ORDER BY ts DESC LIMIT %s
                 """,
                 (limit,),
@@ -465,11 +502,12 @@ def load_history_from_db(limit=HISTORY_LOAD_LIMIT):
                 prices_by_snap.setdefault(snap_id, {})[str(idx)] = price
 
     history = []
-    for snap_id, ts, cheapest_price, cheapest_match in rows:
+    for snap_id, ts, cheapest_price, cheapest_match, cheapest_full in rows:
         history.append(
             {
                 "timestamp": ts.strftime("%Y-%m-%dT%H:%M:%S"),
                 "cheapest_price": cheapest_price,
+                "cheapest_price_full": cheapest_full,
                 "cheapest_match": cheapest_match,
                 "prices": prices_by_snap.get(snap_id, {}),
             }
@@ -477,7 +515,8 @@ def load_history_from_db(limit=HISTORY_LOAD_LIMIT):
     return history
 
 
-def save_snapshot_to_db(timestamp_str, cheapest_price, cheapest_match, prices):
+def save_snapshot_to_db(timestamp_str, cheapest_price, cheapest_match, prices,
+                        cheapest_price_full=None):
     """Schreibt einen Snapshot. ON CONFLICT verhindert Duplikate, falls
     mehrere Worker gleichzeitig refreshen (Race-Condition-Schutz)."""
     init_db()
@@ -485,12 +524,13 @@ def save_snapshot_to_db(timestamp_str, cheapest_price, cheapest_match, prices):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO snapshots (ts, cheapest_price, cheapest_match)
-                VALUES (%s, %s, %s)
+                INSERT INTO snapshots
+                    (ts, cheapest_price, cheapest_match, cheapest_price_full)
+                VALUES (%s, %s, %s, %s)
                 ON CONFLICT (ts) DO NOTHING
                 RETURNING id
                 """,
-                (timestamp_str, cheapest_price, cheapest_match),
+                (timestamp_str, cheapest_price, cheapest_match, cheapest_price_full),
             )
             row = cur.fetchone()
             if row is None:  # Duplikat: anderer Worker war schneller
@@ -558,37 +598,50 @@ def save_history_to_gist(history):
     response.raise_for_status()
 
 
-def append_history_point(team_tokens):
-    """Berechnet die Preise aller Matches (fixer Referenz-Rabatt) und
-    persistiert einen vollständigen Snapshot — bevorzugt in Postgres,
-    sonst im Gist-Fallback."""
+def append_history_point(team_tokens, player_tokens=None):
+    """Persistiert einen Snapshot — bevorzugt in Postgres, sonst im Gist.
+
+    Gespeichert werden ZWEI Werte:
+      cheapest_price      Referenzbasis (nur Teamsticker, ungerundet). Diese
+                          Reihe läuft seit Sammelbeginn durch und bleibt daher
+                          die Grundlage für Chart, Statistik, Prognose und
+                          Kauf-Indikator — auch über die Formeländerung hinweg.
+      cheapest_price_full Der tatsächliche Craft-Preis nach heutiger Formel
+                          (inkl. Player-Sticker, Pauschale, Aufrundung). Wächst
+                          ab jetzt heran und kann später die Basis werden.
+
+    Der günstigste Match wird nach dem echten Craft-Preis bestimmt.
+    """
     if not history_enabled():
         return []
 
-    results, _ = compute_results(team_tokens, HISTORY_DISCOUNT)
+    results, _ = compute_results(team_tokens, HISTORY_DISCOUNT, player_tokens)
+    if not results:
+        return load_history_from_db() if db_enabled() else load_history_from_gist()
+
+    cheapest = results[0]
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    match_label = f"{cheapest['team1']} vs {cheapest['team2']}"
+    reference_price = round(cheapest["reference_price"], 2)
+    full_price = round(cheapest["price_eur"], 2)
+    per_match = {
+        str(r["match_index"]): round(r["reference_price"], 2) for r in results
+    }
 
     if db_enabled():
-        if results:
-            cheapest = results[0]
-            save_snapshot_to_db(
-                time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
-                round(cheapest["price_eur"], 2),
-                f"{cheapest['team1']} vs {cheapest['team2']}",
-                {str(r["match_index"]): round(r["price_eur"], 2) for r in results},
-            )
+        save_snapshot_to_db(
+            timestamp, reference_price, match_label, per_match, full_price
+        )
         return load_history_from_db()
 
     history = load_history_from_gist()
-    if not results:
-        return history
-
-    cheapest = results[0]
     history.append(
         {
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
-            "cheapest_price": round(cheapest["price_eur"], 2),
-            "cheapest_match": f"{cheapest['team1']} vs {cheapest['team2']}",
-            "prices": {str(r["match_index"]): round(r["price_eur"], 2) for r in results},
+            "timestamp": timestamp,
+            "cheapest_price": reference_price,
+            "cheapest_price_full": full_price,
+            "cheapest_match": match_label,
+            "prices": per_match,
         }
     )
     save_history_to_gist(history)
@@ -602,11 +655,13 @@ def get_team_tokens(force=False):
 
     if force or _cache["team_tokens"] is None or stale:
         try:
-            _cache["team_tokens"] = load_team_tokens()
+            teams, players = load_team_tokens()
+            _cache["team_tokens"] = teams
+            _cache["player_tokens"] = players
             _cache["error"] = None
             _cache["timestamp"] = now
             try:
-                _cache["history"] = append_history_point(_cache["team_tokens"])
+                _cache["history"] = append_history_point(teams, players)
             except Exception:  # noqa: BLE001 - History-Ausfall darf die Seite nicht killen
                 app.logger.exception("History-Update fehlgeschlagen")
         except (requests.exceptions.RequestException, KeyError, ValueError) as exc:
@@ -614,11 +669,21 @@ def get_team_tokens(force=False):
             if _cache["team_tokens"] is None:
                 raise
 
-    return _cache["team_tokens"], _cache["error"]
+    return _cache["team_tokens"], _cache["player_tokens"], _cache["error"]
 
 
-def compute_results(team_tokens, discount):
+def compute_results(team_tokens, discount, player_tokens=None):
+    """Berechnet für jedes Match den Craft-Preis.
+
+    Craft = Teamsticker 1 + Teamsticker 2 + die günstigsten Player-Sticker
+    beider Teams + pauschaler Aufschlag. Auf die rabattierte Summe rundet der
+    Shop auf ganze Tokens auf.
+
+    Zusätzlich wird pro Match der Referenzwert (nur Teamsticker, ohne Rundung)
+    mitgeliefert — er bildet die durchgehende Basis der gespeicherten History.
+    """
     matches = load_matches()
+    player_tokens = player_tokens or {}
 
     results = []
     missing = set()
@@ -634,8 +699,17 @@ def compute_results(team_tokens, discount):
             missing.add(team2)
             continue
 
-        total_tokens = team_tokens[team1] + team_tokens[team2]
-        discounted_tokens = total_tokens * (1 - discount)
+        team_sum = team_tokens[team1] + team_tokens[team2]
+
+        # Günstigste Player-Sticker aus beiden Teams zusammen
+        pool = sorted(player_tokens.get(team1, []) + player_tokens.get(team2, []))
+        chosen_players = pool[:PLAYER_STICKERS]
+        player_sum = sum(chosen_players)
+
+        total_tokens = team_sum + player_sum + FLAT_SURCHARGE
+        # round() gegen Fließkomma-Artefakte (2500*0.04 = 100.00000000000001),
+        # danach aufrunden wie im Shop.
+        discounted_tokens = float(math.ceil(round(total_tokens * (1 - discount), 6)))
         price = (discounted_tokens / 100) * TOKENS_PER_100
 
         results.append(
@@ -646,6 +720,10 @@ def compute_results(team_tokens, discount):
                 "tokens": total_tokens,
                 "discounted_tokens": discounted_tokens,
                 "price_eur": price,
+                "player_tokens": player_sum,
+                "player_count": len(chosen_players),
+                # Referenzbasis für die History: nur Teamsticker, ungerundet
+                "reference_price": (team_sum * (1 - discount) / 100) * TOKENS_PER_100,
             }
         )
 
@@ -1185,8 +1263,8 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     currency = resolve_currency()
     rate = get_rate(currency)
     symbol = CURRENCIES[currency]
-    team_tokens, error = get_team_tokens(force=force_token_refresh)
-    results, missing = compute_results(team_tokens, discount)
+    team_tokens, player_tokens, error = get_team_tokens(force=force_token_refresh)
+    results, missing = compute_results(team_tokens, discount, player_tokens)
 
     def conv(value):
         return value if value is None else round(value * rate, 2)
