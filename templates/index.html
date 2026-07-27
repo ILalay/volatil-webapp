@@ -26,6 +26,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -677,12 +678,31 @@
         data-cf-beacon='{"token": "{{ cf_analytics_token }}"}'></script>
 {% endif %}
 </body>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
   const T = {{ t | tojson }};
   const CUR_SYM = {{ currency_symbol | tojson }};
   const IS_MOBILE = window.matchMedia('(max-width: 640px)').matches;
   const HISTORY_ENABLED = {{ history_enabled | tojson }};
+
+  // Chart.js (~70 KB gzip) wird erst geladen, wenn wirklich ein Chart-Panel
+  // geöffnet wird. Alle Panels starten eingeklappt — so bleibt der kritische
+  // Pfad beim Seitenaufbau frei (bessere LCP).
+  const CHARTJS_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js';
+  let chartJsPromise = null;
+
+  function loadChartJs() {
+    if (window.Chart) return Promise.resolve();
+    if (!chartJsPromise) {
+      chartJsPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = CHARTJS_URL;
+        s.onload = () => resolve();
+        s.onerror = () => { chartJsPromise = null; reject(new Error('Chart.js')); };
+        document.head.appendChild(s);
+      });
+    }
+    return chartJsPromise;
+  }
 
   function fmt(str, params) {
     return str.replace(/\{(\w+)\}/g, (_, k) => (params[k] !== undefined ? params[k] : ''));
@@ -800,6 +820,7 @@
         indexAxis: 'y',
         responsive: true,
         maintainAspectRatio: false,
+        animation: false,
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: (item) => `${item.raw.toFixed(2)} ${CUR_SYM}` } }
@@ -931,6 +952,7 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        animation: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
           forecastShade: hasPrediction ? { startIndex: historyLabels.length - 1 } : {},
@@ -1010,6 +1032,7 @@
           options: {
             responsive: true,
             maintainAspectRatio: false,
+            animation: false,
             interaction: { mode: 'index', intersect: false },
             plugins: {
               legend: { display: false },
@@ -1039,20 +1062,33 @@
   }
 
   if (matchSelect) {
-    matchSelect.addEventListener('change', () => loadMatchHistory(matchSelect.value));
+    matchSelect.addEventListener('change', () => {
+      loadChartJs().then(() => loadMatchHistory(matchSelect.value)).catch(() => {});
+    });
   }
 
   // Panels starten eingeklappt. Charts werden erst beim ersten Aufklappen
   // erzeugt (lazy) — und nur, wenn die Daten schon geladen sind.
+  // Führt fn erst nach dem nächsten Paint aus. Dadurch endet die Klick-
+  // Interaktion sofort mit dem Aufklappen (gute INP-Werte), der teure
+  // Chart-Aufbau läuft erst danach.
+  function afterPaint(fn) {
+    requestAnimationFrame(() => setTimeout(fn, 0));
+  }
+
   function togglePanel(panelId) {
     const panel = document.getElementById(panelId);
     panel.classList.toggle('collapsed');
     if (panel.classList.contains('collapsed')) return;
-    initChartsForPanel(panelId);
+    afterPaint(() => initChartsForPanel(panelId));
   }
 
   function initChartsForPanel(panelId) {
     if (!pageData) return; // Daten noch nicht da — wird nachgeholt, sobald sie ankommen
+    loadChartJs().then(() => buildChartsForPanel(panelId)).catch(() => {});
+  }
+
+  function buildChartsForPanel(panelId) {
 
     if (panelId === 'panel-top15' && !top15Initialized) {
       initTop15Chart();
