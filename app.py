@@ -146,7 +146,6 @@ TRANSLATIONS = {
         "footer_text": "Rabatt {percent} % · Kurs: 100 Tokens = 153 ¥",
         "price_dataset_label": "Preis (¥)",
         "cheapest_dataset_label": "Günstigster Preis (¥)",
-        "craft_dataset_label": "Craft-Preis (¥)",
         "facts_title": "Fakten",
         "loading_text": "Lade Preise …",
         "fact_never_changed": "Der Preis von {match} hat sich seit {duration} nicht verändert.",
@@ -161,7 +160,7 @@ TRANSLATIONS = {
         "prediction_dataset_label": "Prognose (Modell)",
         "prediction_range_label": "Typische Schwankungsbreite",
         "prediction_disclaimer": "Prognosen sind unsicher und können vom tatsächlichen Verlauf abweichen.",
-        "history_basis_note": "Der Verlauf zeigt den Referenzpreis (nur die beiden Teamsticker). So bleibt die Zeitreihe seit Sammelbeginn vergleichbar. Der vollständige Craft-Preis inklusive Player-Sticker steht in der Tabelle.",
+        "history_basis_note": "Ältere Datenpunkte enthalten nur die beiden Teamsticker und liegen daher rund 1–2 % niedriger — der kleine Sprung im Verlauf ist die Umstellung auf den vollständigen Craft-Preis, keine echte Preisänderung.",
         "prediction_deviation": "Prognose (24h): {percent} · typische Schwankung ±{range} %.",
     },
     "en": {
@@ -203,7 +202,6 @@ TRANSLATIONS = {
         "footer_text": "Discount {percent}% · Rate: 100 tokens = ¥153",
         "price_dataset_label": "Price (¥)",
         "cheapest_dataset_label": "Cheapest price (¥)",
-        "craft_dataset_label": "Craft price (¥)",
         "facts_title": "Facts",
         "loading_text": "Loading prices …",
         "fact_never_changed": "The price of {match} hasn't changed in {duration}.",
@@ -218,7 +216,7 @@ TRANSLATIONS = {
         "prediction_dataset_label": "Forecast (model)",
         "prediction_range_label": "Typical range",
         "prediction_disclaimer": "Forecasts are uncertain and may deviate from actual prices.",
-        "history_basis_note": "The chart shows the reference price (both team stickers only), keeping the series comparable since tracking began. The full craft price including player stickers is in the table.",
+        "history_basis_note": "Older data points only include both team stickers and therefore sit about 1–2 % lower — the small step in the chart is the switch to the full craft price, not an actual price change.",
         "prediction_deviation": "Forecast (24h): {percent} · typical range ±{range} %.",
     },
     "zh": {
@@ -260,7 +258,6 @@ TRANSLATIONS = {
         "footer_text": "折扣 {percent}% · 汇率：100代币 = ¥153",
         "price_dataset_label": "价格 (¥)",
         "cheapest_dataset_label": "最低价格 (¥)",
-        "craft_dataset_label": "定制价格 (¥)",
         "facts_title": "趣味数据",
         "loading_text": "正在加载价格 …",
         "fact_never_changed": "{match} 的价格已经 {duration} 没有变化了。",
@@ -275,7 +272,7 @@ TRANSLATIONS = {
         "prediction_dataset_label": "预测（模型）",
         "prediction_range_label": "典型波动区间",
         "prediction_disclaimer": "预测存在不确定性，可能与实际价格不符。",
-        "history_basis_note": "走势图显示参考价（仅两枚战队贴纸），以保持自开始记录以来的可比性。含选手贴纸的完整定制价格见表格。",
+        "history_basis_note": "较早的数据点仅包含两枚战队贴纸，因此约低 1–2%——图中的小幅跳升是切换到完整定制价格所致，并非真实的价格变动。",
         "prediction_deviation": "预测（24小时）：{percent} · 典型波动 ±{range} %。",
     },
 }
@@ -342,7 +339,6 @@ def currency_adjusted_translations(lang, currency):
     for key in (
         "price_dataset_label",
         "cheapest_dataset_label",
-        "craft_dataset_label",
         "fact_longest_expensive",
         "fact_longest_cheapest",
     ):
@@ -1242,9 +1238,13 @@ def compute_buy_indicator(history):
         try:
             with _db_connect() as conn:
                 with conn.cursor() as cur:
+                    # COALESCE bildet dieselbe zusammengeführte Reihe wie die
+                    # Anzeige: Craft-Preis wo vorhanden, sonst Referenzpreis.
                     cur.execute(
                         """
-                        SELECT count(*) FILTER (WHERE cheapest_price > %s),
+                        SELECT count(*) FILTER (
+                                   WHERE COALESCE(cheapest_price_full,
+                                                  cheapest_price) > %s),
                                count(*)
                         FROM snapshots
                         """,
@@ -1341,63 +1341,77 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     preset_values = {p["discount"] for p in DISCOUNT_PRESETS}
     is_custom_discount = discount_percent not in preset_values
 
-    history_stats = compute_history_stats(history)
-    # Bei Postgres den wirklich ältesten Snapshot als Alltime-Basis nutzen
-    # (die geladene History ist auf die letzten Punkte begrenzt).
-    if history_stats and db_enabled():
-        try:
-            with _db_connect() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT cheapest_price FROM snapshots ORDER BY ts LIMIT 1")
-                    row = cur.fetchone()
-            if row and row[0]:
-                baseline = row[0]
-                current = history_stats["current"]
-                history_stats["change_all_abs"] = round(current - baseline, 2)
-                history_stats["change_all_pct"] = round((current - baseline) / baseline * 100, 1)
-        except Exception:  # noqa: BLE001 - Alltime-Basis ist optional
-            app.logger.exception("Alltime-Baseline-Query fehlgeschlagen")
-    history_prediction = compute_price_prediction(history)
-    facts = compute_facts(history)
-    history_prices = [h["cheapest_price"] for h in history]
+    def display_price(entry):
+        """Eine einzige, durchgehende Preisreihe für die Anzeige.
 
-    if hist_factor != 1.0:
-        history_prices = [hconv(p) for p in history_prices]
-        if history_stats:
-            for key in ("current", "change_all_abs", "change_24h_abs", "min", "max", "avg"):
-                if key in history_stats:
-                    history_stats[key] = hconv(history_stats[key])
-        if history_prediction:
-            for key in ("prices", "optimistic", "conservative"):
-                history_prediction[key] = [hconv(p) for p in history_prediction[key]]
-        for f in facts:
-            if "price" in f:
-                f["price"] = hconv(f["price"])
-
-    # Craft-Preis-Reihe: existiert erst ab der Formelumstellung, davor None.
-    # Beim Umskalieren auf andere Rabattstufen bleibt eine Unschärfe von
-    # maximal einem Token, weil im gespeicherten Wert bereits aufgerundet ist.
-    def craft_price_from_history(entry):
-        """Craft-Preis für die aktuell gewählte Rabatt-/Währungseinstellung.
-
-        Aus den gespeicherten Rohtokens exakt nachgerechnet — gleiche Kette wie
-        in compute_results, daher stimmt der Graph auf den Yen mit der Tabelle
-        überein. Nur für Altzeilen ohne Rohtokens wird auf den gespeicherten
-        Preis zurückgefallen (dort bleibt eine Rundungsunschärfe).
+        Ab der Formelumstellung der echte Craft-Preis, exakt aus den
+        gespeicherten Rohtokens nachgerechnet (gleiche Kette wie in
+        compute_results, daher stimmt der Graph auf den Yen mit der Tabelle
+        überein). Für ältere Snapshots gibt es nur den Referenzpreis ohne
+        Player-Sticker — dort liegt die Reihe rund 1–2 % niedriger, was am
+        Übergang als kleiner Sprung sichtbar ist.
         """
         raw = entry.get("cheapest_tokens_full")
         if raw is not None:
             tokens = math.ceil(round(raw * (1 - discount), 6))
             return round_shop_price((tokens / 100) * TOKENS_PER_100 * rate, currency)
         stored = entry.get("cheapest_price_full")
-        if stored is None:
-            return None
-        return round_shop_price(stored * hist_factor, currency)
+        if stored is not None:
+            return round_shop_price(stored * hist_factor, currency)
+        return round_shop_price(entry["cheapest_price"] * hist_factor, currency)
 
-    history_prices_full = [craft_price_from_history(h) for h in history]
+    # Statistik, Prognose und Fakten rechnen direkt auf der Anzeigereihe —
+    # damit zeigen Chart, Stat-Boxen und Tabelle durchgehend dieselben Zahlen.
+    display_history = [dict(h, cheapest_price=display_price(h)) for h in history]
 
-    chart_labels_hist, chart_prices_hist, chart_prices_full = downsample_for_chart(
-        [[h["timestamp"] for h in history], history_prices, history_prices_full]
+    # Für den Kauf-Indikator: dieselbe Reihe in der gespeicherten Basis
+    # (Referenz-Rabatt, ¥) — passend zur SQL-Abfrage über die volle History.
+    base_history = [
+        dict(h, cheapest_price=(
+            h["cheapest_price_full"]
+            if h.get("cheapest_price_full") is not None
+            else h["cheapest_price"]
+        ))
+        for h in history
+    ]
+
+    history_prices = [h["cheapest_price"] for h in display_history]
+    history_stats = compute_history_stats(display_history)
+    history_prediction = compute_price_prediction(display_history)
+    facts = compute_facts(display_history)
+
+    # Alltime-Basis: ältester Snapshot der gesamten Datenbank, auf dieselbe
+    # Anzeigebasis umgerechnet (die geladene History ist begrenzt).
+    if history_stats and db_enabled():
+        try:
+            with _db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT cheapest_price, cheapest_price_full, cheapest_tokens_full
+                        FROM snapshots ORDER BY ts LIMIT 1
+                        """
+                    )
+                    row = cur.fetchone()
+            if row and (row[0] or row[1] or row[2]):
+                baseline = display_price(
+                    {
+                        "cheapest_price": row[0],
+                        "cheapest_price_full": row[1],
+                        "cheapest_tokens_full": row[2],
+                    }
+                )
+                current = history_stats["current"]
+                if baseline:
+                    history_stats["change_all_abs"] = round(current - baseline, 2)
+                    history_stats["change_all_pct"] = round(
+                        (current - baseline) / baseline * 100, 1
+                    )
+        except Exception:  # noqa: BLE001 - Alltime-Basis ist optional
+            app.logger.exception("Alltime-Baseline-Query fehlgeschlagen")
+
+    chart_labels_hist, chart_prices_hist = downsample_for_chart(
+        [[h["timestamp"] for h in history], history_prices]
     )
 
     return {
@@ -1413,9 +1427,8 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "history_enabled": history_enabled(),
         "history_labels": chart_labels_hist,
         "history_prices": chart_prices_hist,
-        "history_prices_full": chart_prices_full,
         "history_stats": history_stats,
-        "buy_indicator": compute_buy_indicator(history),
+        "buy_indicator": compute_buy_indicator(base_history),
         "history_prediction": history_prediction,
         "match_options": match_options,
         "facts": facts,
