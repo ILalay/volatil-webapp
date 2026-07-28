@@ -672,6 +672,18 @@ def get_team_tokens(force=False):
     return _cache["team_tokens"], _cache["player_tokens"], _cache["error"]
 
 
+def round_shop_price(value, currency):
+    """Der Shop rundet auch den Endpreis auf die kleinste Währungseinheit auf:
+    2905,47 JPY werden zu 2906 JPY. Für EUR/USD entsprechend auf ganze Cent
+    (dieselbe Regel angenommen — für JPY belegt).
+    round() vorher gegen Fließkomma-Artefakte."""
+    if value is None:
+        return None
+    if currency == "JPY":
+        return float(math.ceil(round(value, 6)))
+    return math.ceil(round(value * 100, 6)) / 100.0
+
+
 def compute_results(team_tokens, discount, player_tokens=None):
     """Berechnet für jedes Match den Craft-Preis.
 
@@ -1267,7 +1279,8 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     results, missing = compute_results(team_tokens, discount, player_tokens)
 
     def conv(value):
-        return value if value is None else round(value * rate, 2)
+        """Währungsumrechnung inklusive der Aufrundung des Shops."""
+        return None if value is None else round_shop_price(value * rate, currency)
 
     # Die History ist mit festem Referenz-Rabatt gespeichert. Da der Rabatt
     # multiplikativ wirkt, lassen sich alle daraus abgeleiteten Werte exakt
@@ -1277,12 +1290,12 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     def hconv(value):
         return value if value is None else round(value * hist_factor, 2)
 
-    if rate != 1.0:
-        # results kommen frisch aus compute_results und dürfen mutiert werden;
-        # die gecachte History bleibt unangetastet (Basis ¥), konvertiert
-        # werden nur die daraus abgeleiteten Auslieferungswerte.
-        for r in results:
-            r["price_eur"] = conv(r["price_eur"])
+    # results kommen frisch aus compute_results und dürfen mutiert werden;
+    # die gecachte History bleibt unangetastet (Basis ¥), konvertiert werden
+    # nur die daraus abgeleiteten Auslieferungswerte.
+    for r in results:
+        r["price_eur"] = conv(r["price_eur"])
+    results.sort(key=lambda x: (x["price_eur"], x["discounted_tokens"]))
 
     chart_size = 15
     top_results = results[:chart_size]
@@ -1398,6 +1411,7 @@ def render_with_lang(force_token_refresh=False):
             currencies=CURRENCIES,
             current_currency=currency,
             currency_symbol=symbol,
+            currency_decimals=0 if currency == "JPY" else 2,
             supported_langs=SUPPORTED_LANGS,
             lang_labels=LANG_LABELS,
             discount_presets=DISCOUNT_PRESETS,
