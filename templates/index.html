@@ -875,10 +875,34 @@
       fill: true
     }];
 
+    // Craft-Preis-Reihe: erst ab der Formelumstellung vorhanden, davor null.
+    // Chart.js zeichnet null-Werte als Lücke, die Linie beginnt also genau dort,
+    // wo die Daten anfangen — nichts wird rückwirkend geschätzt.
+    const fullSeries = pageData.history_prices_full || [];
+    if (fullSeries.some((v) => v !== null && v !== undefined)) {
+      datasets.push({
+        label: T.craft_dataset_label,
+        data: fullSeries.slice(),
+        borderColor: 'rgba(242, 184, 75, 0.95)',
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointBackgroundColor: 'rgba(242, 184, 75, 0.95)',
+        borderWidth: 2,
+        stepped: true,
+        fill: false,
+        spanGaps: false
+      });
+    }
+
     const hasPrediction = historyPrediction && historyPrediction.labels && historyPrediction.labels.length > 0;
     if (hasPrediction) {
       labels.push(...historyPrediction.labels);
-      for (let i = 0; i < historyPrediction.labels.length; i++) actualData.push(null);
+      for (let i = 0; i < historyPrediction.labels.length; i++) {
+        actualData.push(null);
+        datasets.forEach((ds) => {
+          if (ds.label === T.craft_dataset_label) ds.data.push(null);
+        });
+      }
 
       const predictionData = new Array(historyLabels.length - 1).fill(null);
       predictionData.push(historyPrices[historyPrices.length - 1]); // Anschluss an letzten echten Punkt
@@ -964,7 +988,7 @@
         plugins: {
           forecastShade: hasPrediction ? { startIndex: historyLabels.length - 1 } : {},
           legend: {
-            display: hasPrediction,
+            display: hasPrediction || datasets.length > 1,
             labels: {
               color: '#7a8085', font: { family: 'JetBrains Mono', size: IS_MOBILE ? 9 : 10 }, boxWidth: IS_MOBILE ? 9 : 12, padding: IS_MOBILE ? 6 : 10,
               filter: (item) => !item.text.startsWith('_')
