@@ -117,7 +117,7 @@ TRANSLATIONS = {
         "buy_good": "Günstig",
         "buy_mid": "Neutral",
         "buy_bad": "Teuer",
-        "buy_detail": "günstiger als {percent} % aller Messungen",
+        "buy_detail": "günstiger als {percent} % der bisherigen Zeit",
         "og_description": "Live-Preise & günstigste Gold-Sticker-Kombinationen für die IEM Cologne 2026 — mit Verlauf, Prognose und Kauf-Indikator.",
         "refresh_button": "Preise neu laden",
         "discount_label": "Rabatt %",
@@ -173,7 +173,7 @@ TRANSLATIONS = {
         "buy_good": "Cheap",
         "buy_mid": "Neutral",
         "buy_bad": "Expensive",
-        "buy_detail": "cheaper than {percent} % of all measurements",
+        "buy_detail": "cheaper than {percent} % of the time so far",
         "og_description": "Live prices & cheapest gold sticker combos for IEM Cologne 2026 — with history, forecast and buy indicator.",
         "refresh_button": "Reload prices",
         "discount_label": "Discount %",
@@ -229,7 +229,7 @@ TRANSLATIONS = {
         "buy_good": "便宜",
         "buy_mid": "中性",
         "buy_bad": "偏贵",
-        "buy_detail": "低于历史 {percent} % 的记录",
+        "buy_detail": "低于历史 {percent} % 的时间",
         "og_description": "IEM Cologne 2026 金色贴纸最低价组合实时追踪——含历史走势、预测与购买指标。",
         "refresh_button": "刷新价格",
         "discount_label": "折扣 %",
@@ -781,6 +781,7 @@ def compute_history_stats(history):
 
     prices = [h["cheapest_price"] for h in history]
     timestamps = [h["timestamp"] for h in history]
+    gewichte = time_weights(timestamps)
     current = prices[-1]
 
     # "Gesamt": Änderung gegenüber dem ältesten Punkt der History (Alltime).
@@ -820,7 +821,11 @@ def compute_history_stats(history):
         "change_24h_pct": change_24h_pct,
         "min": round(min(prices), 2),
         "max": round(max(prices), 2),
-        "avg": round(sum(prices) / len(prices), 2),
+        # Zeitgewichtet, sonst würde die dichter gemessene Phase den
+        # Durchschnitt dominieren (Intervallwechsel 30 min -> 10 min).
+        "avg": round(
+            sum(p * w for p, w in zip(prices, gewichte)) / sum(gewichte), 2
+        ) if sum(gewichte) else round(sum(prices) / len(prices), 2),
         "count": len(prices),
     }
 
@@ -1226,6 +1231,42 @@ def downsample_for_chart(series, max_points=CHART_MAX_POINTS):
     return [[s[i] for i in idx] for s in series]
 
 
+# Ein Snapshot repräsentiert die Zeit bis zum nächsten. Längere Lücken
+# (Ausfälle, Deploy-Pausen) werden gedeckelt, damit sie nicht dominieren.
+MAX_WEIGHT_SECONDS = 2 * 3600
+
+
+def time_weights(timestamps):
+    """Gewicht je Snapshot = Dauer bis zum nächsten, gedeckelt.
+
+    Nötig, weil das Messintervall über die Zeit wechselt (erst 30 min, jetzt
+    10 min). Ohne Gewichtung wäre die dichter gemessene Phase dreifach
+    überrepräsentiert und jede Aussage über "wie oft war es günstiger"
+    systematisch verzerrt.
+    """
+    n = len(timestamps)
+    if n == 0:
+        return []
+    if n == 1:
+        return [1.0]
+
+    dts = []
+    for ts in timestamps:
+        try:
+            dts.append(datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S"))
+        except (ValueError, TypeError):
+            return [1.0] * n  # unlesbare Zeitstempel: ungewichtet
+
+    gaps = []
+    for i in range(n - 1):
+        gap = (dts[i + 1] - dts[i]).total_seconds()
+        gaps.append(min(max(gap, 0.0), MAX_WEIGHT_SECONDS))
+    # Der letzte Punkt erbt das typische Intervall
+    typisch = sorted(g for g in gaps if g > 0)
+    gaps.append(typisch[len(typisch) // 2] if typisch else 1.0)
+    return gaps if any(gaps) else [1.0] * n
+
+
 def craft_chain_ratio(history):
     """Verhältnis Craft-/Referenzpreis, gemessen an Snapshots, in denen BEIDE
     Werte zum selben Zeitpunkt vorliegen.
@@ -1262,27 +1303,38 @@ def compute_buy_indicator(history, chain_ratio=1.0):
                     # Craft-Preis wo vorhanden, sonst der auf Craft-Niveau
                     # verkettete Referenzpreis — sonst wirkte der aktuelle
                     # Preis allein durch die Formeländerung "teuer".
+                    # Zeitgewichtet: jeder Snapshot zählt so viel, wie er an
+                    # Zeit abdeckt — sonst verzerrt der Wechsel des
+                    # Messintervalls (30 min -> 10 min) das Ergebnis.
                     cur.execute(
                         """
-                        SELECT count(*) FILTER (WHERE v > %s + 0.005),
-                               count(*) FILTER (WHERE abs(v - %s) <= 0.005),
-                               count(*)
-                        FROM (
+                        WITH d AS (
                             SELECT COALESCE(cheapest_price_full,
-                                            cheapest_price * %s) AS v
+                                            cheapest_price * %s) AS v,
+                                   EXTRACT(EPOCH FROM (
+                                       LEAD(ts) OVER (ORDER BY ts) - ts)) AS gap
                             FROM snapshots
-                        ) s
+                        ), w AS (
+                            SELECT v, LEAST(COALESCE(gap, 0), %s) AS wt FROM d
+                        )
+                        SELECT COALESCE(sum(wt) FILTER (WHERE v > %s + 0.005), 0),
+                               COALESCE(sum(wt) FILTER (WHERE abs(v - %s) <= 0.005), 0),
+                               COALESCE(sum(wt), 0)
+                        FROM w
                         """,
-                        (current, current, chain_ratio),
+                        (chain_ratio, MAX_WEIGHT_SECONDS, current, current),
                     )
-                    above, equal, total = cur.fetchone()
+                    above, equal, total = (float(x) for x in cur.fetchone())
         except Exception:  # noqa: BLE001 - Indikator ist optional
             app.logger.exception("Kauf-Indikator-Query fehlgeschlagen")
             return None
     else:
-        above = sum(1 for h in history if h["cheapest_price"] > current + 0.005)
-        equal = sum(1 for h in history if abs(h["cheapest_price"] - current) <= 0.005)
-        total = len(history)
+        gew = time_weights([h["timestamp"] for h in history])
+        above = sum(w for h, w in zip(history, gew)
+                    if h["cheapest_price"] > current + 0.005)
+        equal = sum(w for h, w in zip(history, gew)
+                    if abs(h["cheapest_price"] - current) <= 0.005)
+        total = sum(gew)
 
     if not total:
         return None
