@@ -1226,7 +1226,28 @@ def downsample_for_chart(series, max_points=CHART_MAX_POINTS):
     return [[s[i] for i in idx] for s in series]
 
 
-def compute_buy_indicator(history):
+def craft_chain_ratio(history):
+    """Verhältnis Craft-/Referenzpreis, gemessen an Snapshots, in denen BEIDE
+    Werte zum selben Zeitpunkt vorliegen.
+
+    Damit lassen sich die alten Referenz-Datenpunkte auf Craft-Niveau
+    verketten — dasselbe Verfahren wie bei umbasierten Indexreihen. Das ist
+    keine Schätzung ins Blaue: der Faktor ist an echten Doppelmessungen
+    abgelesen. Genutzt wird er nur für Prognose und Kauf-Indikator, die eine
+    sprungfreie Reihe brauchen — die Anzeige bleibt unverändert.
+    """
+    ratios = sorted(
+        h["cheapest_price_full"] / h["cheapest_price"]
+        for h in history
+        if h.get("cheapest_price_full") and h.get("cheapest_price")
+    )
+    if not ratios:
+        return 1.0
+    m = len(ratios)
+    return ratios[m // 2] if m % 2 else (ratios[m // 2 - 1] + ratios[m // 2]) / 2
+
+
+def compute_buy_indicator(history, chain_ratio=1.0):
     """Ordnet den aktuellen günstigsten Preis ins historische Perzentil ein:
     'aktuell günstiger als X % aller Messungen'. Bei Postgres über die
     komplette History per SQL, sonst über die geladenen Punkte."""
@@ -1238,29 +1259,37 @@ def compute_buy_indicator(history):
         try:
             with _db_connect() as conn:
                 with conn.cursor() as cur:
-                    # COALESCE bildet dieselbe zusammengeführte Reihe wie die
-                    # Anzeige: Craft-Preis wo vorhanden, sonst Referenzpreis.
+                    # Craft-Preis wo vorhanden, sonst der auf Craft-Niveau
+                    # verkettete Referenzpreis — sonst wirkte der aktuelle
+                    # Preis allein durch die Formeländerung "teuer".
                     cur.execute(
                         """
-                        SELECT count(*) FILTER (
-                                   WHERE COALESCE(cheapest_price_full,
-                                                  cheapest_price) > %s),
+                        SELECT count(*) FILTER (WHERE v > %s + 0.005),
+                               count(*) FILTER (WHERE abs(v - %s) <= 0.005),
                                count(*)
-                        FROM snapshots
+                        FROM (
+                            SELECT COALESCE(cheapest_price_full,
+                                            cheapest_price * %s) AS v
+                            FROM snapshots
+                        ) s
                         """,
-                        (current,),
+                        (current, current, chain_ratio),
                     )
-                    above, total = cur.fetchone()
+                    above, equal, total = cur.fetchone()
         except Exception:  # noqa: BLE001 - Indikator ist optional
             app.logger.exception("Kauf-Indikator-Query fehlgeschlagen")
             return None
     else:
-        above = sum(1 for h in history if h["cheapest_price"] > current)
+        above = sum(1 for h in history if h["cheapest_price"] > current + 0.005)
+        equal = sum(1 for h in history if abs(h["cheapest_price"] - current) <= 0.005)
         total = len(history)
 
     if not total:
         return None
-    percentile = round(above / total * 100)
+    # Gleichstände zur Hälfte zählen (Mittelrang). Ohne das läge der Indikator
+    # bei Plateau-Preisen dauerhaft bei 0 %, obwohl der Preis schlicht
+    # unverändert ist.
+    percentile = round((above + 0.5 * equal) / total * 100)
     if percentile >= 70:
         level = "good"
     elif percentile >= 35:
@@ -1364,20 +1393,36 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     # damit zeigen Chart, Stat-Boxen und Tabelle durchgehend dieselben Zahlen.
     display_history = [dict(h, cheapest_price=display_price(h)) for h in history]
 
-    # Für den Kauf-Indikator: dieselbe Reihe in der gespeicherten Basis
-    # (Referenz-Rabatt, ¥) — passend zur SQL-Abfrage über die volle History.
+    # Prognose und Kauf-Indikator brauchen eine SPRUNGFREIE Reihe: der Wechsel
+    # der Formel ist keine Preisbewegung und darf weder als Trend extrapoliert
+    # noch als "teuer" gewertet werden. Alte Referenzpunkte werden dafür über
+    # den an Doppelmessungen abgelesenen Faktor auf Craft-Niveau verkettet.
+    chain_ratio = craft_chain_ratio(history)
+
+    def model_price(entry):
+        if (entry.get("cheapest_tokens_full") is not None
+                or entry.get("cheapest_price_full") is not None):
+            return display_price(entry)
+        return round_shop_price(
+            entry["cheapest_price"] * chain_ratio * hist_factor, currency
+        )
+
+    model_history = [dict(h, cheapest_price=model_price(h)) for h in history]
+
+    # Für den Kauf-Indikator: dieselbe verkettete Reihe in der gespeicherten
+    # Basis (Referenz-Rabatt, ¥) — passend zur SQL-Abfrage über die volle History.
     base_history = [
         dict(h, cheapest_price=(
             h["cheapest_price_full"]
             if h.get("cheapest_price_full") is not None
-            else h["cheapest_price"]
+            else h["cheapest_price"] * chain_ratio
         ))
         for h in history
     ]
 
     history_prices = [h["cheapest_price"] for h in display_history]
     history_stats = compute_history_stats(display_history)
-    history_prediction = compute_price_prediction(display_history)
+    history_prediction = compute_price_prediction(model_history)
     facts = compute_facts(display_history)
 
     # Alltime-Basis: ältester Snapshot der gesamten Datenbank, auf dieselbe
@@ -1428,7 +1473,7 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "history_labels": chart_labels_hist,
         "history_prices": chart_prices_hist,
         "history_stats": history_stats,
-        "buy_indicator": compute_buy_indicator(base_history),
+        "buy_indicator": compute_buy_indicator(base_history, chain_ratio),
         "history_prediction": history_prediction,
         "match_options": match_options,
         "facts": facts,
