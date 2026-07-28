@@ -684,6 +684,10 @@
 <script>
   const T = {{ t | tojson }};
   const CUR_SYM = {{ currency_symbol | tojson }};
+  const CUR_DEC = {{ currency_decimals }};   // JPY kennt keine Untereinheit
+
+  const fmtNum = (v) => Number(v).toFixed(CUR_DEC);
+  const fmtPrice = (v) => `${fmtNum(v)} ${CUR_SYM}`;
   const IS_MOBILE = window.matchMedia('(max-width: 640px)').matches;
   const HISTORY_ENABLED = {{ history_enabled | tojson }};
 
@@ -771,9 +775,9 @@
       case 'never_changed':
         return fmt(T.fact_never_changed, { match: esc(f.match), duration: formatDuration(f.duration_seconds) });
       case 'longest_expensive':
-        return fmt(T.fact_longest_expensive, { match: esc(f.match), duration: formatDuration(f.duration_seconds), price: f.price.toFixed(2) });
+        return fmt(T.fact_longest_expensive, { match: esc(f.match), duration: formatDuration(f.duration_seconds), price: fmtNum(f.price) });
       case 'longest_cheapest':
-        return fmt(T.fact_longest_cheapest, { match: esc(f.match), duration: formatDuration(f.duration_seconds), price: f.price.toFixed(2) });
+        return fmt(T.fact_longest_cheapest, { match: esc(f.match), duration: formatDuration(f.duration_seconds), price: fmtNum(f.price) });
       case 'mover_up':
         return fmt(T.fact_mover_up, { match: esc(f.match), percent: f.percent.toFixed(1) });
       case 'mover_down':
@@ -826,7 +830,7 @@
         animation: false,
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: (item) => `${item.raw.toFixed(2)} ${CUR_SYM}` } }
+          tooltip: { callbacks: { label: (item) => fmtPrice(item.raw) } }
         },
         scales: {
           x: {
@@ -970,7 +974,7 @@
             filter: (item) => !item.dataset.label.startsWith('_'),
             callbacks: {
               title: (items) => tsTooltipLabel(items[0].label),
-              label: (item) => `${item.dataset.label}: ${item.raw.toFixed(2)} ${CUR_SYM}`
+              label: (item) => `${item.dataset.label}: ${fmtPrice(item.raw)}`
             }
           }
         },
@@ -1042,7 +1046,7 @@
               tooltip: {
                 callbacks: {
                   title: (items) => tsTooltipLabel(items[0].label),
-                  label: (item) => `${item.raw.toFixed(2)} ${CUR_SYM}`
+                  label: (item) => fmtPrice(item.raw)
                 }
               }
             },
@@ -1141,7 +1145,7 @@
         <span class="sparkline-cell">${m.sparkline_svg ? m.sparkline_svg : '<span class="no-data">–</span>'}</span>
         <span class="delta">${renderDelta(m.change_24h_pct)}</span>
         <span class="tokens">${Math.round(m.tokens)}</span>
-        <span class="price">${m.price_eur.toFixed(2)} ${CUR_SYM}</span>
+        <span class="price">${fmtPrice(m.price_eur)}</span>
       </div>
     `).join('');
     document.getElementById('tableBody').innerHTML = html;
@@ -1192,28 +1196,28 @@
     grid.classList.remove('hidden');
     document.getElementById('historyNotEnough').classList.add('hidden');
 
-    document.getElementById('statCurrent').textContent = stats.current.toFixed(2) + ' ' + CUR_SYM;
+    document.getElementById('statCurrent').textContent = fmtPrice(stats.current);
 
     const setChange = (elId, abs, pct) => {
       const el = document.getElementById(elId);
       if (abs === null || abs === undefined) { el.textContent = '–'; el.className = 'value'; return; }
       const sign = abs > 0 ? '+' : '';
-      el.textContent = `${sign}${abs.toFixed(2)} ${CUR_SYM}` + (pct !== null && pct !== undefined ? ` (${sign}${pct.toFixed(1)}%)` : '');
+      el.textContent = `${sign}${fmtPrice(abs)}` + (pct !== null && pct !== undefined ? ` (${sign}${pct.toFixed(1)}%)` : '');
       el.className = 'value ' + (abs > 0 ? 'pos' : abs < 0 ? 'neg' : '');
     };
     setChange('statChange24h', stats.change_24h_abs, stats.change_24h_pct);
     const allEl = document.getElementById('statChangeAll');
     if (stats.change_all_abs !== null && stats.change_all_abs !== undefined) {
       const s = stats.change_all_abs > 0 ? '+' : '';
-      allEl.textContent = `${T.stat_change_all}: ${s}${stats.change_all_abs.toFixed(2)} ${CUR_SYM}`
+      allEl.textContent = `${T.stat_change_all}: ${s}${fmtPrice(stats.change_all_abs)}`
         + (stats.change_all_pct !== null ? ` (${s}${stats.change_all_pct.toFixed(1)}%)` : '');
     } else {
       allEl.textContent = '';
     }
 
-    document.getElementById('statMin').textContent = stats.min.toFixed(2) + ' ' + CUR_SYM;
-    document.getElementById('statMax').textContent = stats.max.toFixed(2) + ' ' + CUR_SYM;
-    document.getElementById('statAvg').textContent = stats.avg.toFixed(2) + ' ' + CUR_SYM;
+    document.getElementById('statMin').textContent = fmtPrice(stats.min);
+    document.getElementById('statMax').textContent = fmtPrice(stats.max);
+    document.getElementById('statAvg').textContent = fmtPrice(stats.avg);
     document.getElementById('statPoints').textContent = stats.count;
   }
 
