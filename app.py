@@ -468,10 +468,15 @@ def init_db():
                     PRIMARY KEY (snapshot_id, match_index)
                 );
                 CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots (ts);
-                -- Nachträglich ergänzt: tatsächlicher Craft-Preis. Alte Zeilen
-                -- bleiben NULL, da sich der Wert rückwirkend nicht bilden lässt.
+                -- Nachträglich ergänzt: Craft-Werte. Alte Zeilen bleiben NULL,
+                -- da sie sich rückwirkend nicht bilden lassen.
+                -- Gespeichert werden die ROHTOKENS vor Rabatt: daraus lässt
+                -- sich jeder Rabatt und jede Währung exakt ableiten, ohne die
+                -- Ungenauigkeit eines bereits gerundeten Preises.
                 ALTER TABLE snapshots
                     ADD COLUMN IF NOT EXISTS cheapest_price_full DOUBLE PRECISION;
+                ALTER TABLE snapshots
+                    ADD COLUMN IF NOT EXISTS cheapest_tokens_full DOUBLE PRECISION;
                 """
             )
     _db_initialized = True
@@ -485,7 +490,8 @@ def load_history_from_db(limit=HISTORY_LOAD_LIMIT):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, ts, cheapest_price, cheapest_match, cheapest_price_full
+                SELECT id, ts, cheapest_price, cheapest_match,
+                       cheapest_price_full, cheapest_tokens_full
                 FROM snapshots ORDER BY ts DESC LIMIT %s
                 """,
                 (limit,),
@@ -506,12 +512,13 @@ def load_history_from_db(limit=HISTORY_LOAD_LIMIT):
                 prices_by_snap.setdefault(snap_id, {})[str(idx)] = price
 
     history = []
-    for snap_id, ts, cheapest_price, cheapest_match, cheapest_full in rows:
+    for snap_id, ts, cheapest_price, cheapest_match, cheapest_full, tokens_full in rows:
         history.append(
             {
                 "timestamp": ts.strftime("%Y-%m-%dT%H:%M:%S"),
                 "cheapest_price": cheapest_price,
                 "cheapest_price_full": cheapest_full,
+                "cheapest_tokens_full": tokens_full,
                 "cheapest_match": cheapest_match,
                 "prices": prices_by_snap.get(snap_id, {}),
             }
@@ -520,7 +527,7 @@ def load_history_from_db(limit=HISTORY_LOAD_LIMIT):
 
 
 def save_snapshot_to_db(timestamp_str, cheapest_price, cheapest_match, prices,
-                        cheapest_price_full=None):
+                        cheapest_price_full=None, cheapest_tokens_full=None):
     """Schreibt einen Snapshot. ON CONFLICT verhindert Duplikate, falls
     mehrere Worker gleichzeitig refreshen (Race-Condition-Schutz)."""
     init_db()
@@ -529,12 +536,14 @@ def save_snapshot_to_db(timestamp_str, cheapest_price, cheapest_match, prices,
             cur.execute(
                 """
                 INSERT INTO snapshots
-                    (ts, cheapest_price, cheapest_match, cheapest_price_full)
-                VALUES (%s, %s, %s, %s)
+                    (ts, cheapest_price, cheapest_match,
+                     cheapest_price_full, cheapest_tokens_full)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (ts) DO NOTHING
                 RETURNING id
                 """,
-                (timestamp_str, cheapest_price, cheapest_match, cheapest_price_full),
+                (timestamp_str, cheapest_price, cheapest_match,
+                 cheapest_price_full, cheapest_tokens_full),
             )
             row = cur.fetchone()
             if row is None:  # Duplikat: anderer Worker war schneller
@@ -626,7 +635,10 @@ def append_history_point(team_tokens, player_tokens=None):
     cheapest = results[0]  # results sind nach Craft-Preis sortiert
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
     match_label = f"{cheapest['team1']} vs {cheapest['team2']}"
-    full_price = round(cheapest["price_eur"], 2)
+    full_price = round_shop_price(cheapest["price_eur"], "JPY")
+    # Rohtokens vor Rabatt — daraus lässt sich später jeder Rabatt und jede
+    # Währung exakt nachrechnen (der Preis oben ist nur noch Fallback).
+    full_tokens = cheapest["tokens"]
     # WICHTIG: Die Referenzreihe muss weiterhin das Minimum ALLER Referenz-
     # preise sein — sonst bekäme sie eine Bruchstelle, sobald das nach Craft-
     # Preis günstigste Match ein anderes ist als das nach Referenzpreis.
@@ -637,7 +649,8 @@ def append_history_point(team_tokens, player_tokens=None):
 
     if db_enabled():
         save_snapshot_to_db(
-            timestamp, reference_price, match_label, per_match, full_price
+            timestamp, reference_price, match_label, per_match,
+            full_price, full_tokens
         )
         return load_history_from_db()
 
@@ -647,6 +660,7 @@ def append_history_point(team_tokens, player_tokens=None):
             "timestamp": timestamp,
             "cheapest_price": reference_price,
             "cheapest_price_full": full_price,
+            "cheapest_tokens_full": full_tokens,
             "cheapest_match": match_label,
             "prices": per_match,
         }
@@ -1363,9 +1377,24 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     # Craft-Preis-Reihe: existiert erst ab der Formelumstellung, davor None.
     # Beim Umskalieren auf andere Rabattstufen bleibt eine Unschärfe von
     # maximal einem Token, weil im gespeicherten Wert bereits aufgerundet ist.
-    history_prices_full = [h.get("cheapest_price_full") for h in history]
-    if hist_factor != 1.0:
-        history_prices_full = [hconv(p) for p in history_prices_full]
+    def craft_price_from_history(entry):
+        """Craft-Preis für die aktuell gewählte Rabatt-/Währungseinstellung.
+
+        Aus den gespeicherten Rohtokens exakt nachgerechnet — gleiche Kette wie
+        in compute_results, daher stimmt der Graph auf den Yen mit der Tabelle
+        überein. Nur für Altzeilen ohne Rohtokens wird auf den gespeicherten
+        Preis zurückgefallen (dort bleibt eine Rundungsunschärfe).
+        """
+        raw = entry.get("cheapest_tokens_full")
+        if raw is not None:
+            tokens = math.ceil(round(raw * (1 - discount), 6))
+            return round_shop_price((tokens / 100) * TOKENS_PER_100 * rate, currency)
+        stored = entry.get("cheapest_price_full")
+        if stored is None:
+            return None
+        return round_shop_price(stored * hist_factor, currency)
+
+    history_prices_full = [craft_price_from_history(h) for h in history]
 
     chart_labels_hist, chart_prices_hist, chart_prices_full = downsample_for_chart(
         [[h["timestamp"] for h in history], history_prices, history_prices_full]
