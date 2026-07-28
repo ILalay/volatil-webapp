@@ -146,6 +146,7 @@ TRANSLATIONS = {
         "footer_text": "Rabatt {percent} % · Kurs: 100 Tokens = 153 ¥",
         "price_dataset_label": "Preis (¥)",
         "cheapest_dataset_label": "Günstigster Preis (¥)",
+        "craft_dataset_label": "Craft-Preis (¥)",
         "facts_title": "Fakten",
         "loading_text": "Lade Preise …",
         "fact_never_changed": "Der Preis von {match} hat sich seit {duration} nicht verändert.",
@@ -202,6 +203,7 @@ TRANSLATIONS = {
         "footer_text": "Discount {percent}% · Rate: 100 tokens = ¥153",
         "price_dataset_label": "Price (¥)",
         "cheapest_dataset_label": "Cheapest price (¥)",
+        "craft_dataset_label": "Craft price (¥)",
         "facts_title": "Facts",
         "loading_text": "Loading prices …",
         "fact_never_changed": "The price of {match} hasn't changed in {duration}.",
@@ -258,6 +260,7 @@ TRANSLATIONS = {
         "footer_text": "折扣 {percent}% · 汇率：100代币 = ¥153",
         "price_dataset_label": "价格 (¥)",
         "cheapest_dataset_label": "最低价格 (¥)",
+        "craft_dataset_label": "定制价格 (¥)",
         "facts_title": "趣味数据",
         "loading_text": "正在加载价格 …",
         "fact_never_changed": "{match} 的价格已经 {duration} 没有变化了。",
@@ -339,6 +342,7 @@ def currency_adjusted_translations(lang, currency):
     for key in (
         "price_dataset_label",
         "cheapest_dataset_label",
+        "craft_dataset_label",
         "fact_longest_expensive",
         "fact_longest_cheapest",
     ):
@@ -619,11 +623,14 @@ def append_history_point(team_tokens, player_tokens=None):
     if not results:
         return load_history_from_db() if db_enabled() else load_history_from_gist()
 
-    cheapest = results[0]
+    cheapest = results[0]  # results sind nach Craft-Preis sortiert
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
     match_label = f"{cheapest['team1']} vs {cheapest['team2']}"
-    reference_price = round(cheapest["reference_price"], 2)
     full_price = round(cheapest["price_eur"], 2)
+    # WICHTIG: Die Referenzreihe muss weiterhin das Minimum ALLER Referenz-
+    # preise sein — sonst bekäme sie eine Bruchstelle, sobald das nach Craft-
+    # Preis günstigste Match ein anderes ist als das nach Referenzpreis.
+    reference_price = round(min(r["reference_price"] for r in results), 2)
     per_match = {
         str(r["match_index"]): round(r["reference_price"], 2) for r in results
     }
@@ -1195,18 +1202,18 @@ def compute_match_changes(history, hours=24):
 CHART_MAX_POINTS = 400
 
 
-def downsample_for_chart(labels, prices, max_points=CHART_MAX_POINTS):
-    """Dünnt die Punktzahl fürs Chart aus (gleichmäßig, letzter Punkt bleibt
-    immer erhalten). Stats, Prognose und Kauf-Indikator rechnen weiterhin auf
-    der vollen History — das hier betrifft nur die Darstellung."""
-    n = len(prices)
+def downsample_for_chart(series, max_points=CHART_MAX_POINTS):
+    """Dünnt mehrere gleich lange Reihen synchron aus (gleichmäßig, der letzte
+    Punkt bleibt immer erhalten). Stats, Prognose und Kauf-Indikator rechnen
+    weiterhin auf der vollen History — das hier betrifft nur die Darstellung."""
+    n = len(series[0]) if series else 0
     if n <= max_points:
-        return labels, prices
+        return list(series)
     step = -(-n // max_points)  # Aufrundende Division
     idx = list(range(0, n, step))
     if idx[-1] != n - 1:
         idx.append(n - 1)
-    return [labels[i] for i in idx], [prices[i] for i in idx]
+    return [[s[i] for i in idx] for s in series]
 
 
 def compute_buy_indicator(history):
@@ -1353,8 +1360,15 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
             if "price" in f:
                 f["price"] = hconv(f["price"])
 
-    chart_labels_hist, chart_prices_hist = downsample_for_chart(
-        [h["timestamp"] for h in history], history_prices
+    # Craft-Preis-Reihe: existiert erst ab der Formelumstellung, davor None.
+    # Beim Umskalieren auf andere Rabattstufen bleibt eine Unschärfe von
+    # maximal einem Token, weil im gespeicherten Wert bereits aufgerundet ist.
+    history_prices_full = [h.get("cheapest_price_full") for h in history]
+    if hist_factor != 1.0:
+        history_prices_full = [hconv(p) for p in history_prices_full]
+
+    chart_labels_hist, chart_prices_hist, chart_prices_full = downsample_for_chart(
+        [[h["timestamp"] for h in history], history_prices, history_prices_full]
     )
 
     return {
@@ -1370,6 +1384,7 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "history_enabled": history_enabled(),
         "history_labels": chart_labels_hist,
         "history_prices": chart_prices_hist,
+        "history_prices_full": chart_prices_full,
         "history_stats": history_stats,
         "buy_indicator": compute_buy_indicator(history),
         "history_prediction": history_prediction,
