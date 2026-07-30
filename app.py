@@ -1288,7 +1288,43 @@ def craft_chain_ratio(history):
     return ratios[m // 2] if m % 2 else (ratios[m // 2 - 1] + ratios[m // 2]) / 2
 
 
-def compute_buy_indicator(history, chain_ratio=1.0):
+def db_history_aggregates(current, chain_ratio):
+    """Holt in EINER Abfrage alles, was sonst zwei Round-Trips bräuchte:
+    die zeitgewichteten Aggregate für den Kauf-Indikator und den ältesten
+    Snapshot für den Alltime-Vergleich. Auf Neon (Scale-to-Zero) kostet jeder
+    zusätzliche Round-Trip merklich Zeit."""
+    with _db_connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH d AS (
+                    SELECT COALESCE(cheapest_price_full,
+                                    cheapest_price * %s) AS v,
+                           EXTRACT(EPOCH FROM (
+                               LEAD(ts) OVER (ORDER BY ts) - ts)) AS gap
+                    FROM snapshots
+                ), w AS (
+                    SELECT v, LEAST(COALESCE(gap, 0), %s) AS wt FROM d
+                ), agg AS (
+                    SELECT COALESCE(sum(wt) FILTER (WHERE v > %s + 0.005), 0) AS above,
+                           COALESCE(sum(wt) FILTER (WHERE abs(v - %s) <= 0.005), 0) AS equal,
+                           COALESCE(sum(wt), 0) AS total
+                    FROM w
+                ), oldest AS (
+                    SELECT cheapest_price, cheapest_price_full, cheapest_tokens_full
+                    FROM snapshots ORDER BY ts LIMIT 1
+                )
+                SELECT agg.above, agg.equal, agg.total,
+                       oldest.cheapest_price, oldest.cheapest_price_full,
+                       oldest.cheapest_tokens_full
+                FROM agg LEFT JOIN oldest ON true
+                """,
+                (chain_ratio, MAX_WEIGHT_SECONDS, current, current),
+            )
+            return cur.fetchone()
+
+
+def compute_buy_indicator(history, chain_ratio=1.0, aggregates=None):
     """Ordnet den aktuellen günstigsten Preis ins historische Perzentil ein:
     'aktuell günstiger als X % aller Messungen'. Bei Postgres über die
     komplette History per SQL, sonst über die geladenen Punkte."""
@@ -1296,7 +1332,9 @@ def compute_buy_indicator(history, chain_ratio=1.0):
         return None
     current = history[-1]["cheapest_price"]
 
-    if db_enabled():
+    if aggregates is not None:
+        above, equal, total = (float(x) for x in aggregates)
+    elif db_enabled():
         try:
             with _db_connect() as conn:
                 with conn.cursor() as cur:
@@ -1477,35 +1515,31 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
     history_prediction = compute_price_prediction(model_history)
     facts = compute_facts(display_history)
 
-    # Alltime-Basis: ältester Snapshot der gesamten Datenbank, auf dieselbe
-    # Anzeigebasis umgerechnet (die geladene History ist begrenzt).
-    if history_stats and db_enabled():
+    # Eine gemeinsame DB-Abfrage für Kauf-Indikator und Alltime-Basis.
+    indicator_aggregates = None
+    if db_enabled() and base_history:
         try:
-            with _db_connect() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT cheapest_price, cheapest_price_full, cheapest_tokens_full
-                        FROM snapshots ORDER BY ts LIMIT 1
-                        """
+            row = db_history_aggregates(
+                base_history[-1]["cheapest_price"], chain_ratio
+            )
+            if row:
+                indicator_aggregates = row[:3]
+                if history_stats and (row[3] or row[4] or row[5]):
+                    baseline = display_price(
+                        {
+                            "cheapest_price": row[3],
+                            "cheapest_price_full": row[4],
+                            "cheapest_tokens_full": row[5],
+                        }
                     )
-                    row = cur.fetchone()
-            if row and (row[0] or row[1] or row[2]):
-                baseline = display_price(
-                    {
-                        "cheapest_price": row[0],
-                        "cheapest_price_full": row[1],
-                        "cheapest_tokens_full": row[2],
-                    }
-                )
-                current = history_stats["current"]
-                if baseline:
-                    history_stats["change_all_abs"] = round(current - baseline, 2)
-                    history_stats["change_all_pct"] = round(
-                        (current - baseline) / baseline * 100, 1
-                    )
-        except Exception:  # noqa: BLE001 - Alltime-Basis ist optional
-            app.logger.exception("Alltime-Baseline-Query fehlgeschlagen")
+                    current = history_stats["current"]
+                    if baseline:
+                        history_stats["change_all_abs"] = round(current - baseline, 2)
+                        history_stats["change_all_pct"] = round(
+                            (current - baseline) / baseline * 100, 1
+                        )
+        except Exception:  # noqa: BLE001 - beides ist optional
+            app.logger.exception("History-Aggregate fehlgeschlagen")
 
     chart_labels_hist, chart_prices_hist = downsample_for_chart(
         [[h["timestamp"] for h in history], history_prices]
@@ -1525,7 +1559,9 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
         "history_labels": chart_labels_hist,
         "history_prices": chart_prices_hist,
         "history_stats": history_stats,
-        "buy_indicator": compute_buy_indicator(base_history, chain_ratio),
+        "buy_indicator": compute_buy_indicator(
+            base_history, chain_ratio, indicator_aggregates
+        ),
         "history_prediction": history_prediction,
         "match_options": match_options,
         "facts": facts,
@@ -1603,7 +1639,9 @@ def api_page_data():
         app.logger.exception("page-data fehlgeschlagen")
         return {"error": True}
 
-    data.pop("t", None)
+    # "t" bleibt in der Antwort: der Währungswechsel im Frontend braucht die
+    # angepassten Labels (Symbol im Chart-Titel, Tokenpreis im Footer), ohne
+    # dafür die ganze Seite neu zu laden.
     data.pop("supported_langs", None)
     data.pop("lang_labels", None)
     data.pop("discount_presets", None)
