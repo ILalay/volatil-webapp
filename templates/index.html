@@ -59,6 +59,9 @@
     position: relative;
   }
 
+  /* Kurze visuelle Rückmeldung beim Währungswechsel */
+  #mainContent.switching { opacity: 0.5; transition: opacity 0.1s ease; }
+
   .switch-sep { width: 1px; align-self: stretch; background: var(--panel-border); margin: 0 0.35rem; }
 
   .lang-switch {
@@ -255,6 +258,7 @@
 
   /* ---- Charts / Panels ---- */
   .board {
+    contain: layout style;
     border: 1px solid var(--panel-border);
     border-radius: 6px;
     overflow: hidden;
@@ -397,6 +401,11 @@
   }
 
   .row {
+    /* Zeilen außerhalb des sichtbaren Bereichs überspringen Layout und Paint.
+       Bei 106 Zeilen mit je einer inline-SVG-Sparkline ist das der größte
+       Posten beim Aufklappen der Panels darüber. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 51px;
     display: grid;
     grid-template-columns: 3.2rem 1fr 6.5rem 5.5rem 7rem 8rem;
     align-items: center;
@@ -408,6 +417,7 @@
   .row:last-child { border-bottom: none; }
 
   .row.head {
+    content-visibility: visible;
     color: var(--muted);
     font-size: 0.68rem;
     letter-spacing: 0.12em;
@@ -508,6 +518,7 @@
       padding: 0.7rem 0.9rem;
     }
     .rank { grid-area: rank; align-self: start; }
+    .row { contain-intrinsic-size: auto 62px; }
     .team { grid-area: team; }
     .price { grid-area: price; align-self: start; }
     .sparkline-cell { display: none; }
@@ -520,7 +531,10 @@
     .row.head span:nth-child(3),
     .row.head span:nth-child(4),
     .row.head span:nth-child(5) { display: none; }
-    .switch-sep { width: 1px; align-self: stretch; background: var(--panel-border); margin: 0 0.35rem; }
+    /* Kurze visuelle Rückmeldung beim Währungswechsel */
+  #mainContent.switching { opacity: 0.5; transition: opacity 0.1s ease; }
+
+  .switch-sep { width: 1px; align-self: stretch; background: var(--panel-border); margin: 0 0.35rem; }
 
   .lang-switch { position: static; justify-content: flex-end; margin-bottom: 0.8rem; }
   }
@@ -536,7 +550,8 @@
     {% endfor %}
     <span class="switch-sep"></span>
     {% for code, sym in currencies.items() %}
-    <a class="lang-btn {% if code == current_currency %}active{% endif %}"
+    <a class="lang-btn currency-btn {% if code == current_currency %}active{% endif %}"
+       data-currency="{{ code }}"
        href="?currency={{ code }}{% if request.args.get('discount') %}&discount={{ request.args.get('discount') }}{% endif %}">{{ sym }}</a>
     {% endfor %}
   </div>
@@ -566,7 +581,7 @@
   </div>
 </header>
 
-<main>
+<main id="mainContent">
   <div id="errorBanner" class="error-banner hidden"></div>
 
   {% if history_enabled %}
@@ -672,7 +687,7 @@
 </main>
 
 <footer>
-  {{ t.footer_text.format(percent=discount_percent) }}
+  <span id="footerText">{{ t.footer_text.format(percent=discount_percent) }}</span>
 </footer>
 
 {% if cf_analytics_token %}
@@ -682,9 +697,10 @@
 {% endif %}
 </body>
 <script>
-  const T = {{ t | tojson }};
-  const CUR_SYM = {{ currency_symbol | tojson }};
-  const CUR_DEC = {{ currency_decimals }};   // JPY kennt keine Untereinheit
+  let T = {{ t | tojson }};
+  let CUR_SYM = {{ currency_symbol | tojson }};
+  let CUR_DEC = {{ currency_decimals }};   // JPY kennt keine Untereinheit
+  let CURRENCY = {{ current_currency | tojson }};
 
   const fmtNum = (v) => Number(v).toFixed(CUR_DEC);
   const fmtPrice = (v) => `${fmtNum(v)} ${CUR_SYM}`;
@@ -1080,7 +1096,10 @@
   // Interaktion sofort mit dem Aufklappen (gute INP-Werte), der teure
   // Chart-Aufbau läuft erst danach.
   function afterPaint(fn) {
-    requestAnimationFrame(() => setTimeout(fn, 0));
+    // Das zweite requestAnimationFrame feuert erst, nachdem der Browser den
+    // ersten Frame gezeichnet hat — verlässlicher als setTimeout(0), das je
+    // nach Auslastung noch im selben Frame landen kann.
+    requestAnimationFrame(() => requestAnimationFrame(fn));
   }
 
   function togglePanel(panelId) {
@@ -1163,7 +1182,11 @@
 
   function renderMatchOptions(options) {
     if (!matchSelect) return;
+    const vorher = matchSelect.value;   // Auswahl über den Neuaufbau retten
     matchSelect.innerHTML = options.map((o) => `<option value="${Number(o.index)}">${esc(o.label)}</option>`).join('');
+    if (vorher && [...matchSelect.options].some((o) => o.value === vorher)) {
+      matchSelect.value = vorher;
+    }
   }
 
   function renderFacts(facts) {
@@ -1227,8 +1250,48 @@
     banner.classList.remove('hidden');
   }
 
-  function loadPageData() {
-    fetch('/api/page-data' + window.location.search)
+  // Zerstört alle bestehenden Charts, damit sie mit neuen Werten sauber
+  // neu aufgebaut werden können.
+  function resetCharts() {
+    if (!window.Chart) return;
+    document.querySelectorAll('canvas').forEach((canvas) => {
+      const chart = Chart.getChart(canvas);
+      if (chart) chart.destroy();
+    });
+    top15Initialized = false;
+    historySummaryInitialized = false;
+    matchHistoryInitialized = false;
+    matchHistoryChart = null;
+  }
+
+  // Währungswechsel ohne Seitenneuladen: nur ein API-Aufruf statt komplettem
+  // Reload samt HTML-, CSS- und JS-Neuaufbau.
+  function switchCurrency(code) {
+    if (code === CURRENCY) return false;
+    document.cookie = `currency=${code}; path=/; max-age=31536000; samesite=lax`;
+
+    const params = new URLSearchParams(window.location.search);
+    params.set('currency', code);
+    try {
+      history.replaceState(null, '', '?' + params.toString());
+    } catch (err) {
+      // Darf den Wechsel nicht blockieren — die Währung steckt im Cookie.
+    }
+
+    document.querySelectorAll('.currency-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.currency === code);
+    });
+    document.getElementById('mainContent').classList.add('switching');
+
+    CURRENCY = code;
+    loadPageData({ keepCharts: false })
+      .finally(() => document.getElementById('mainContent').classList.remove('switching'));
+    return false;
+  }
+
+  function loadPageData(opts) {
+    const options = opts || {};
+    return fetch('/api/page-data' + window.location.search)
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {
@@ -1237,6 +1300,19 @@
         }
 
         pageData = data;
+
+        // Währungsabhängige Angaben aus der Antwort übernehmen
+        if (data.t) T = data.t;
+        if (data.currency_symbol) CUR_SYM = data.currency_symbol;
+        if (data.currency) {
+          CURRENCY = data.currency;
+          CUR_DEC = data.currency === 'JPY' ? 0 : 2;
+        }
+        if (T.footer_text) {
+          document.getElementById('footerText').textContent =
+            T.footer_text.replace('{percent}', String(data.discount_percent));
+        }
+        if (options.keepCharts === false) resetCharts();
 
         document.getElementById('teamsLoaded').classList.remove('skeleton');
         document.getElementById('teamsLoaded').style.width = 'auto';
@@ -1270,6 +1346,13 @@
       })
       .catch((err) => showError(String(err)));
   }
+
+  document.querySelectorAll('.currency-btn').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      switchCurrency(btn.dataset.currency);
+    });
+  });
 
   loadPageData();
 
