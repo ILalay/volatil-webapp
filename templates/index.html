@@ -1284,14 +1284,20 @@
     document.getElementById('mainContent').classList.add('switching');
 
     CURRENCY = code;
-    loadPageData({ keepCharts: false })
+    loadPageData({ keepCharts: false, staleOk: true })
       .finally(() => document.getElementById('mainContent').classList.remove('switching'));
     return false;
   }
 
   function loadPageData(opts) {
     const options = opts || {};
-    return fetch('/api/page-data' + window.location.search)
+    // stale_ok: beim Währungswechsel sind es dieselben Tokenpreise, nur eine
+    // andere Umrechnung. Der Server darf dann den vorhandenen Cache nutzen
+    // statt die komplette Shop-API neu durchzublättern (das dauert Sekunden).
+    const params = new URLSearchParams(window.location.search);
+    if (options.staleOk) params.set('stale_ok', '1');
+    const query = params.toString();
+    return fetch('/api/page-data' + (query ? '?' + query : ''))
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {
