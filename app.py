@@ -32,7 +32,12 @@ TOKENS_PER_100 = 153     # 100 Tokens = 153 ¥
 FLAT_SURCHARGE = 1       # pauschaler Token-Aufschlag auf die Rohsumme
 PLAYER_STICKERS = 1      # Anzahl Player-Sticker im Craft
 
-CACHE_SECONDS = 300  # Wie lange die Tokenpreise zwischengespeichert werden
+# Der vollständige API-Abruf blättert die ganze Shop-Liste durch und dauert
+# mehrere Sekunden. Der Cache muss deshalb LÄNGER halten als das Intervall des
+# externen Cron-Jobs (/refresh) — dann erledigt der Cron die teure Arbeit und
+# kein Besucher wartet darauf. Bei einem 10-Minuten-Cron sind 20 Minuten
+# sicher; fällt der Cron aus, sind die Preise maximal so alt.
+CACHE_SECONDS = 1200
 
 # History-Speicher: bevorzugt Postgres (DATABASE_URL, z. B. Neon),
 # sonst Fallback auf GitHub Gist. Ohne beides läuft die Seite ohne History.
@@ -665,10 +670,16 @@ def append_history_point(team_tokens, player_tokens=None):
     return history
 
 
-def get_team_tokens(force=False):
+def get_team_tokens(force=False, allow_stale=False):
     """Team-Tokens mit Cache laden. Wirft eine Exception, wenn nichts geladen werden kann."""
     now = time.time()
     stale = (now - _cache["timestamp"]) > CACHE_SECONDS
+
+    # allow_stale: der Aufrufer braucht keine frischen Preise (etwa beim
+    # Währungswechsel — dieselben Daten, nur andere Multiplikation). Dann wird
+    # ein vorhandener Cache benutzt, egal wie alt er ist.
+    if allow_stale and _cache["team_tokens"] is not None:
+        return _cache["team_tokens"], _cache["player_tokens"], _cache["error"]
 
     if force or _cache["team_tokens"] is None or stale:
         try:
@@ -1410,12 +1421,14 @@ def build_sparklines(results, history):
     }
 
 
-def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG):
+def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG, allow_stale=False):
     discount = parse_discount(request.args.get("discount"))
     currency = resolve_currency()
     rate = get_rate(currency)
     symbol = CURRENCIES[currency]
-    team_tokens, player_tokens, error = get_team_tokens(force=force_token_refresh)
+    team_tokens, player_tokens, error = get_team_tokens(
+        force=force_token_refresh, allow_stale=allow_stale
+    )
     results, missing = compute_results(team_tokens, discount, player_tokens)
 
     def conv(value):
@@ -1633,8 +1646,9 @@ def index():
 @app.route("/api/page-data")
 def api_page_data():
     lang = resolve_lang()
+    allow_stale = request.args.get("stale_ok") == "1"
     try:
-        data = build_page_data(lang=lang)
+        data = build_page_data(lang=lang, allow_stale=allow_stale)
     except Exception:  # noqa: BLE001 - generisch antworten, Details nur ins Log
         app.logger.exception("page-data fehlgeschlagen")
         return {"error": True}
