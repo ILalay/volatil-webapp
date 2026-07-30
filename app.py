@@ -39,6 +39,18 @@ PLAYER_STICKERS = 1      # Anzahl Player-Sticker im Craft
 # sicher; fällt der Cron aus, sind die Preise maximal so alt.
 CACHE_SECONDS = 1200
 
+# Seitengröße beim Durchblättern der Shop-API. Gemessen: die API deckelt bei
+# 100 (9 Seiten / ~2,2 s statt 18 Seiten / ~4,5 s bei 48). Höhere Werte sind
+# unschädlich, bringen aber nichts — weitergeschaltet wird ohnehin um die
+# tatsächlich erhaltene Anzahl (siehe load_team_tokens).
+API_PAGE_LIMIT = int(os.environ.get("API_PAGE_LIMIT", "100"))
+
+# Die API filtert serverseitig nach Raritätsstufe. Gemessen: mit rarity=4
+# kommen 193 statt 772 Items (3 statt 9 Seiten, ~0,8 s statt ~2,2 s), Team-
+# und Playersticker vollständig. Leerer Wert schaltet den Filter ab; die
+# clientseitige Prüfung auf rarity == 4 bleibt in jedem Fall bestehen.
+API_RARITY_FILTER = os.environ.get("API_RARITY_FILTER", "4")
+
 # History-Speicher: bevorzugt Postgres (DATABASE_URL, z. B. Neon),
 # sonst Fallback auf GitHub Gist. Ohne beides läuft die Seite ohne History.
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -365,7 +377,11 @@ def load_team_tokens():
     team_tokens = {}
     player_tokens = {}
     offset = 0
-    limit = 48
+    # Höheres Seitenlimit = weniger Anfragen = schnellerer Abruf. Falls die API
+    # den Wert deckelt, ist das unschädlich: weitergeschaltet wird um die
+    # ANZAHL DER TATSÄCHLICH ERHALTENEN Items, nicht um das angeforderte Limit.
+    # (Mit "offset += limit" würden bei gedeckelter Antwort Items übersprungen.)
+    limit = API_PAGE_LIMIT
 
     while True:
         params = {
@@ -375,6 +391,8 @@ def load_team_tokens():
             "sortDir": "asc",
             "currency": "EUR",
         }
+        if API_RARITY_FILTER:
+            params["rarity"] = API_RARITY_FILTER
 
         response = requests.get(API_URL, params=params, timeout=15)
         response.raise_for_status()
@@ -403,7 +421,7 @@ def load_team_tokens():
                 # Gold-Playersticker, dem Team zugeordnet
                 player_tokens.setdefault(item["teamName"], []).append(item["tokens"])
 
-        offset += limit
+        offset += len(items)
 
     # Teamnamen an Matchliste anpassen
     for old_name, new_name in RENAME.items():
