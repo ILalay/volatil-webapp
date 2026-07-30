@@ -301,6 +301,12 @@ _cache = {
     "timestamp": 0.0,
     "error": None,
     "history": [],
+    # Ergebnis von db_history_aggregates. Hängt ausschließlich von der History
+    # ab (nicht von Währung oder Rabatt) und ist daher für alle Anfragen
+    # identisch — wird deshalb beim History-Refresh EINMAL berechnet. Ohne das
+    # würde jeder Seitenaufruf eine DB-Abfrage auslösen, und auf Neon (Free
+    # Tier, Suspend nach ~5 min Inaktivität) kostet das Aufwecken Sekunden.
+    "history_aggregates": None,
 }
 
 
@@ -701,13 +707,18 @@ def get_team_tokens(force=False, allow_stale=False):
 
     if force or _cache["team_tokens"] is None or stale:
         try:
+            fetch_start = time.time()
             teams, players = load_team_tokens()
+            app.logger.info("Token-Abruf: %.2fs", time.time() - fetch_start)
             _cache["team_tokens"] = teams
             _cache["player_tokens"] = players
             _cache["error"] = None
             _cache["timestamp"] = now
             try:
                 _cache["history"] = append_history_point(teams, players)
+                _cache["history_aggregates"] = compute_history_aggregates(
+                    _cache["history"]
+                )
             except Exception:  # noqa: BLE001 - History-Ausfall darf die Seite nicht killen
                 app.logger.exception("History-Update fehlgeschlagen")
         except (requests.exceptions.RequestException, KeyError, ValueError) as exc:
@@ -1317,6 +1328,32 @@ def craft_chain_ratio(history):
     return ratios[m // 2] if m % 2 else (ratios[m // 2 - 1] + ratios[m // 2]) / 2
 
 
+def compute_history_aggregates(history):
+    """Berechnet die (währungs- und rabattunabhängigen) History-Aggregate.
+
+    Wird beim Aktualisieren der History aufgerufen — also durch den Cron, nicht
+    durch Besucher. Seitenaufrufe und Währungswechsel greifen anschließend nur
+    noch auf den Cache zu und brauchen gar keine Datenbank.
+    """
+    if not (db_enabled() and history):
+        return None
+    ratio = craft_chain_ratio(history)
+    letzter = history[-1]
+    current = (
+        letzter["cheapest_price_full"]
+        if letzter.get("cheapest_price_full") is not None
+        else letzter["cheapest_price"] * ratio
+    )
+    try:
+        start = time.time()
+        row = db_history_aggregates(current, ratio)
+        app.logger.info("History-Aggregate: %.2fs", time.time() - start)
+        return row
+    except Exception:  # noqa: BLE001 - optional
+        app.logger.exception("History-Aggregate fehlgeschlagen")
+        return None
+
+
 def db_history_aggregates(current, chain_ratio):
     """Holt in EINER Abfrage alles, was sonst zwei Round-Trips bräuchte:
     die zeitgewichteten Aggregate für den Kauf-Indikator und den ältesten
@@ -1546,13 +1583,18 @@ def build_page_data(force_token_refresh=False, lang=DEFAULT_LANG, allow_stale=Fa
     history_prediction = compute_price_prediction(model_history)
     facts = compute_facts(display_history)
 
-    # Eine gemeinsame DB-Abfrage für Kauf-Indikator und Alltime-Basis.
+    # Aggregate kommen aus dem Cache (beim History-Refresh berechnet). Nur
+    # falls dort noch nichts liegt — etwa direkt nach einem Worker-Neustart —
+    # wird einmalig selbst abgefragt und das Ergebnis hinterlegt.
     indicator_aggregates = None
     if db_enabled() and base_history:
         try:
-            row = db_history_aggregates(
-                base_history[-1]["cheapest_price"], chain_ratio
-            )
+            row = _cache.get("history_aggregates")
+            if row is None:
+                row = db_history_aggregates(
+                    base_history[-1]["cheapest_price"], chain_ratio
+                )
+                _cache["history_aggregates"] = row
             if row:
                 indicator_aggregates = row[:3]
                 if history_stats and (row[3] or row[4] or row[5]):
@@ -1665,11 +1707,17 @@ def index():
 def api_page_data():
     lang = resolve_lang()
     allow_stale = request.args.get("stale_ok") == "1"
+    start = time.time()
     try:
         data = build_page_data(lang=lang, allow_stale=allow_stale)
     except Exception:  # noqa: BLE001 - generisch antworten, Details nur ins Log
         app.logger.exception("page-data fehlgeschlagen")
         return {"error": True}
+
+    app.logger.info(
+        "page-data: %.2fs (stale_ok=%s, currency=%s)",
+        time.time() - start, allow_stale, data.get("currency"),
+    )
 
     # "t" bleibt in der Antwort: der Währungswechsel im Frontend braucht die
     # angepassten Labels (Symbol im Chart-Titel, Tokenpreis im Footer), ohne
